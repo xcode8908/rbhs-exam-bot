@@ -234,17 +234,22 @@ def process_bot_query(raw_text, sender_phone="Unknown"):
 
 Ye bot aapko aapke Exam ka *Subject*, *Sitting Time* aur *Allotted Hall No.* turant batata hai!
 
-📖 *KAISE USE KAREIN (EASY GUIDE):*
-Bus apna Roll Number type karke bhejein. Chota ya bada letter, dash (-) lagayein ya na lagayein, sab chalega!
+📖 *KAISE USE KAREIN:*
+Bus apna Roll Number type karke bhejein. Dash (-) lagayein ya na lagayein, chota ya bada letter sab chalega!
 
-👉 *Examples (Apne Stream Ke Anusaar Bhejein):*
-• *Arts 1st Year:* `ia26015` ya `IA26-015`
-• *Science 1st Year:* `is26001` ya `IS26-001`
-• *Commerce 1st Year:* `ic26005` ya `IC26-005`
+📋 *APNE STREAM KA ROLL NUMBER EXAMPLE DEKHEIN:*
 
-• *Arts 2nd Year:* `ia25015` ya `IA25-015`
-• *Science 2nd Year:* `is25001` ya `IS25-001`
-• *Commerce 2nd Year:* `ic25005` ya `IC25-005`
+🧪 *SCIENCE STREAM:*
+   • +2 1st Year: `IS26-001` (ya `is26001`)
+   • +2 2nd Year: `IS25-001` (ya `is25001`)
+
+💼 *COMMERCE STREAM:*
+   • +2 1st Year: `IC26-005` (ya `ic26005`)
+   • +2 2nd Year: `IC25-005` (ya `ic25005`)
+
+🎨 *ARTS STREAM:*
+   • +2 1st Year: `IA26-015` (ya `ia26015`)
+   • +2 2nd Year: `IA25-015` (ya `ia25015`)
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━
 👇 *Abhi apna Roll Number neeche type karke bhejein:*"""

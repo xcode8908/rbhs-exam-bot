@@ -35,6 +35,17 @@ def init_db():
                 last_query TEXT
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS broadcast_queue (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                phone TEXT NOT NULL,
+                name TEXT,
+                message TEXT NOT NULL,
+                status TEXT DEFAULT 'PENDING',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                sent_at TIMESTAMP
+            )
+        """)
         conn.commit()
 
 init_db()
@@ -341,18 +352,41 @@ def get_bot_users():
         "users": users
     })
 
+def neon_query(sql, return_rows=False):
+    """Executes SQL against Neon Serverless PostgreSQL over HTTP."""
+    neon_url = "https://ep-patient-dream-b30yv2xq-pooler.c-4.ap-southeast-1.aws.neon.tech/sql"
+    neon_conn = os.environ.get("DATABASE_URL", "postgresql://neondb_owner:npg_DTfk4PM9dewh@ep-patient-dream-b30yv2xq-pooler.c-4.ap-southeast-1.aws.neon.tech/neondb?sslmode=require")
+    headers = {
+        "Neon-Connection-String": neon_conn,
+        "Content-Type": "application/json"
+    }
+    try:
+        res = requests.post(neon_url, json={"query": sql}, headers=headers, timeout=6)
+        if res.status_code == 200:
+            if return_rows:
+                return res.json().get("rows", [])
+            return True
+        return [] if return_rows else False
+    except Exception as err:
+        print(f"Neon query error: {err}")
+        return [] if return_rows else False
+
+
 @app.route('/admin/export-users', methods=['GET'])
 def export_users_csv():
     """Download CSV file of all students who used the bot with mobile numbers."""
-    with sqlite3.connect(SQLITE_PATH) as conn:
-        conn.row_factory = sqlite3.Row
-        rows = conn.execute("SELECT phone, roll_no, name, stream, class_year, query_count, last_seen FROM bot_users ORDER BY roll_no").fetchall()
+    rows = neon_query("SELECT phone, roll_no, name, stream, class_year, query_count, last_seen FROM bot_users ORDER BY roll_no;", return_rows=True)
+    if not rows:
+        with sqlite3.connect(SQLITE_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute("SELECT phone, roll_no, name, stream, class_year, query_count, last_seen FROM bot_users ORDER BY roll_no").fetchall()
+            rows = [dict(r) for r in rows]
         
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow(["WhatsApp Mobile Number", "Roll No", "Student Name", "Stream", "Class / Batch", "Total Queries", "Last Active"])
     for r in rows:
-        writer.writerow([r["phone"], r["roll_no"], r["name"], r["stream"], r["class_year"], r["query_count"], r["last_seen"]])
+        writer.writerow([r.get("phone"), r.get("roll_no"), r.get("name"), r.get("stream"), r.get("class_year"), r.get("query_count"), r.get("last_seen")])
         
     return Response(
         output.getvalue(),
@@ -360,27 +394,203 @@ def export_users_csv():
         headers={"Content-Disposition": "attachment;filename=rbhs_students_whatsapp_list.csv"}
     )
 
+
+@app.route('/admin/send-broadcast', methods=['POST'])
+def send_broadcast():
+    """Queue broadcast messages to students via Neon & SQLite queue."""
+    data = request.json or {}
+    target = data.get('target', 'All')
+    message_text = (data.get('message') or '').strip()
+    test_phone = (data.get('test_phone') or '').strip()
+
+    if not message_text:
+        return jsonify({"success": False, "error": "Message content cannot be empty!"}), 400
+
+    recipients = []
+    if test_phone:
+        clean_p = test_phone if test_phone.startswith('+') else '+' + test_phone
+        recipients.append({"phone": clean_p, "name": "Admin Test"})
+    else:
+        where_sql = ""
+        if target in ['Science', 'Commerce', 'Arts']:
+            where_sql = f"WHERE stream = '{target}'"
+        
+        neon_recipients = neon_query(f"SELECT DISTINCT phone, name FROM bot_users {where_sql};", return_rows=True)
+        if neon_recipients:
+            recipients = [u for u in neon_recipients if u.get('phone') and u.get('phone') != 'Unknown']
+        else:
+            with sqlite3.connect(SQLITE_PATH) as conn:
+                conn.row_factory = sqlite3.Row
+                q = "SELECT DISTINCT phone, name FROM bot_users"
+                if target in ['Science', 'Commerce', 'Arts']:
+                    q += f" WHERE stream = '{target}'"
+                rows = conn.execute(q).fetchall()
+                recipients = [dict(r) for r in rows if r['phone'] and r['phone'] != 'Unknown']
+
+    if not recipients:
+        return jsonify({"success": False, "error": f"Koi student nahi mila stream: {target}. Pehle student bot me query karega tabhi uska number add hoga."}), 400
+
+    # Insert into Broadcast Queue
+    clean_msg = message_text.replace("'", "''")
+    queued_count = 0
+
+    for r in recipients:
+        c_phone = str(r.get('phone', '')).replace("'", "''")
+        c_name = str(r.get('name', 'Student')).replace("'", "''")
+        if not c_phone:
+            continue
+
+        sql = f"""
+        INSERT INTO broadcast_queue (phone, name, message, status, created_at)
+        VALUES ('{c_phone}', '{c_name}', '{clean_msg}', 'PENDING', CURRENT_TIMESTAMP);
+        """
+        neon_query(sql)
+        try:
+            with sqlite3.connect(SQLITE_PATH) as conn:
+                conn.execute("INSERT INTO broadcast_queue (phone, name, message, status) VALUES (?, ?, ?, 'PENDING')",
+                             (c_phone, c_name, message_text))
+                conn.commit()
+        except:
+            pass
+        queued_count += 1
+
+    return jsonify({
+        "success": True,
+        "count": queued_count,
+        "message": f"✅ {queued_count} messages queue me add ho gaye! WhatsApp gateway inhe 2-3 second delay ke sath safe delivery karega."
+    })
+
+
+@app.route('/api/pending-broadcasts', methods=['GET'])
+def get_pending_broadcasts():
+    """WhatsApp Gateway Baileys background poller fetches pending messages."""
+    rows = neon_query("SELECT id, phone, name, message FROM broadcast_queue WHERE status = 'PENDING' ORDER BY id ASC LIMIT 5;", return_rows=True)
+    if not rows:
+        try:
+            with sqlite3.connect(SQLITE_PATH) as conn:
+                conn.row_factory = sqlite3.Row
+                r = conn.execute("SELECT id, phone, name, message FROM broadcast_queue WHERE status = 'PENDING' ORDER BY id ASC LIMIT 5").fetchall()
+                rows = [dict(x) for x in r]
+        except:
+            rows = []
+    return jsonify({"messages": rows})
+
+
+@app.route('/api/mark-broadcast-sent', methods=['POST'])
+def mark_broadcast_sent():
+    """WhatsApp Gateway marks delivered or failed broadcast messages."""
+    data = request.json or {}
+    msg_id = data.get('id')
+    status = data.get('status', 'SENT')
+
+    if not msg_id:
+        return jsonify({"success": False, "error": "Missing id"}), 400
+
+    neon_query(f"UPDATE broadcast_queue SET status = '{status}', sent_at = CURRENT_TIMESTAMP WHERE id = {msg_id};")
+    try:
+        with sqlite3.connect(SQLITE_PATH) as conn:
+            conn.execute("UPDATE broadcast_queue SET status = ?, sent_at = CURRENT_TIMESTAMP WHERE id = ?", (status, msg_id))
+            conn.commit()
+    except:
+        pass
+
+    return jsonify({"success": True})
+
+
+@app.route('/admin/broadcast-status', methods=['GET'])
+def broadcast_status():
+    """Provides live metrics and recent items for the Admin UI."""
+    counts = neon_query("""
+        SELECT 
+            COUNT(*) as total,
+            COUNT(*) FILTER (WHERE status = 'PENDING') as pending,
+            COUNT(*) FILTER (WHERE status = 'SENT') as sent,
+            COUNT(*) FILTER (WHERE status = 'FAILED') as failed
+        FROM broadcast_queue;
+    """, return_rows=True)
+
+    recent = neon_query("SELECT id, phone, name, status, sent_at, created_at FROM broadcast_queue ORDER BY id DESC LIMIT 10;", return_rows=True)
+
+    total, pending, sent, failed = 0, 0, 0, 0
+    if counts:
+        c = counts[0]
+        total = int(c.get('total') or 0)
+        pending = int(c.get('pending') or 0)
+        sent = int(c.get('sent') or 0)
+        failed = int(c.get('failed') or 0)
+
+    return jsonify({
+        "total": total,
+        "pending": pending,
+        "sent": sent,
+        "failed": failed,
+        "recent": recent or []
+    })
+
+
 @app.route('/admin', methods=['GET'])
 def admin_dashboard():
     """Visual Admin Web Dashboard for monitoring and broadcasting."""
-    with sqlite3.connect(SQLITE_PATH) as conn:
-        conn.row_factory = sqlite3.Row
-        users = conn.execute("SELECT * FROM bot_users ORDER BY last_seen DESC LIMIT 50").fetchall()
-        total_users = conn.execute("SELECT COUNT(*) FROM bot_users").fetchone()[0]
-        sci_users = conn.execute("SELECT COUNT(*) FROM bot_users WHERE stream = 'Science'").fetchone()[0]
-        com_users = conn.execute("SELECT COUNT(*) FROM bot_users WHERE stream = 'Commerce'").fetchone()[0]
-        arts_users = conn.execute("SELECT COUNT(*) FROM bot_users WHERE stream = 'Arts'").fetchone()[0]
+    # 1. Fetch Students Stats from Neon
+    counts = neon_query("""
+        SELECT 
+            COUNT(*) as total,
+            COUNT(*) FILTER (WHERE stream = 'Science') as sci,
+            COUNT(*) FILTER (WHERE stream = 'Commerce') as com,
+            COUNT(*) FILTER (WHERE stream = 'Arts') as arts
+        FROM bot_users;
+    """, return_rows=True)
+
+    users = neon_query("SELECT * FROM bot_users ORDER BY last_seen DESC LIMIT 50;", return_rows=True)
+
+    if counts and counts[0].get('total') is not None:
+        c = counts[0]
+        total_users = int(c.get('total') or 0)
+        sci_users = int(c.get('sci') or 0)
+        com_users = int(c.get('com') or 0)
+        arts_users = int(c.get('arts') or 0)
+    else:
+        with sqlite3.connect(SQLITE_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            users = conn.execute("SELECT * FROM bot_users ORDER BY last_seen DESC LIMIT 50").fetchall()
+            users = [dict(u) for u in users]
+            total_users = conn.execute("SELECT COUNT(*) FROM bot_users").fetchone()[0]
+            sci_users = conn.execute("SELECT COUNT(*) FROM bot_users WHERE stream = 'Science'").fetchone()[0]
+            com_users = conn.execute("SELECT COUNT(*) FROM bot_users WHERE stream = 'Commerce'").fetchone()[0]
+            arts_users = conn.execute("SELECT COUNT(*) FROM bot_users WHERE stream = 'Arts'").fetchone()[0]
+
+    # 2. Fetch Broadcast Stats
+    b_counts = neon_query("""
+        SELECT 
+            COUNT(*) as total,
+            COUNT(*) FILTER (WHERE status = 'PENDING') as pending,
+            COUNT(*) FILTER (WHERE status = 'SENT') as sent
+        FROM broadcast_queue;
+    """, return_rows=True)
+
+    b_total, b_pending, b_sent = 0, 0, 0
+    if b_counts and b_counts[0].get('total') is not None:
+        bc = b_counts[0]
+        b_total = int(bc.get('total') or 0)
+        b_pending = int(bc.get('pending') or 0)
+        b_sent = int(bc.get('sent') or 0)
 
     rows_html = ""
-    for u in users:
+    for u in (users or []):
+        phone_val = u.get('phone', '')
+        roll_val = u.get('roll_no', '')
+        name_val = u.get('name', '')
+        stream_val = u.get('stream', '')
+        q_cnt = u.get('query_count', 1)
+        last_s = str(u.get('last_seen', ''))[:19]
         rows_html += f"""
         <tr>
-            <td style="padding:10px; border-bottom:1px solid #e2e8f0; font-family:monospace; font-weight:bold; color:#1e40af;">{u['phone']}</td>
-            <td style="padding:10px; border-bottom:1px solid #e2e8f0; font-weight:bold;">{u['roll_no']}</td>
-            <td style="padding:10px; border-bottom:1px solid #e2e8f0;">{u['name']}</td>
-            <td style="padding:10px; border-bottom:1px solid #e2e8f0;"><span style="background:#e0f2fe; color:#0369a1; padding:3px 8px; border-radius:12px; font-size:12px;">{u['stream']}</span></td>
-            <td style="padding:10px; border-bottom:1px solid #e2e8f0; text-align:center;">{u['query_count']}</td>
-            <td style="padding:10px; border-bottom:1px solid #e2e8f0; color:#64748b; font-size:13px;">{u['last_seen']}</td>
+            <td style="padding:10px; border-bottom:1px solid #e2e8f0; font-family:monospace; font-weight:bold; color:#1e40af;">{phone_val}</td>
+            <td style="padding:10px; border-bottom:1px solid #e2e8f0; font-weight:bold;">{roll_val}</td>
+            <td style="padding:10px; border-bottom:1px solid #e2e8f0;">{name_val}</td>
+            <td style="padding:10px; border-bottom:1px solid #e2e8f0;"><span style="background:#e0f2fe; color:#0369a1; padding:3px 8px; border-radius:12px; font-size:12px;">{stream_val}</span></td>
+            <td style="padding:10px; border-bottom:1px solid #e2e8f0; text-align:center;">{q_cnt}</td>
+            <td style="padding:10px; border-bottom:1px solid #e2e8f0; color:#64748b; font-size:13px;">{last_s}</td>
         </tr>
         """
 
@@ -390,39 +600,50 @@ def admin_dashboard():
     <head>
         <title>RBHS Exam Bot - Admin Control Panel</title>
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
         <style>
             body {{ font-family: 'Inter', sans-serif; background: #f8fafc; margin: 0; padding: 20px; color: #1e293b; }}
             .container {{ max-width: 1100px; margin: auto; }}
-            .header {{ background: white; padding: 24px; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 24px; display: flex; justify-content: space-between; align-items: center; }}
+            .header {{ background: white; padding: 24px; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 24px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; }}
             .grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }}
             .card {{ background: white; padding: 20px; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }}
-            .card h3 {{ margin: 0 0 8px 0; font-size: 14px; color: #64748b; text-transform: uppercase; }}
+            .card h3 {{ margin: 0 0 8px 0; font-size: 13px; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; }}
             .card .val {{ font-size: 28px; font-weight: 700; color: #0f172a; }}
-            .btn {{ background: #1e40af; color: white; padding: 10px 20px; border-radius: 8px; text-decoration: none; font-weight: 600; display: inline-block; border: none; cursor: pointer; }}
-            .btn:hover {{ background: #1d4ed8; }}
-            .table-box {{ background: white; padding: 24px; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 24px; }}
+            .btn {{ background: #1e40af; color: white; padding: 10px 18px; border-radius: 8px; text-decoration: none; font-weight: 600; display: inline-flex; align-items: center; gap: 8px; border: none; cursor: pointer; font-size: 14px; transition: 0.2s; }}
+            .btn:hover {{ background: #1d4ed8; transform: translateY(-1px); }}
+            .btn-outline {{ background: white; color: #1e40af; border: 1.5px solid #bfdbfe; }}
+            .btn-outline:hover {{ background: #eff6ff; }}
+            .table-box {{ background: white; padding: 24px; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 24px; overflow-x: auto; }}
             table {{ width: 100%; border-collapse: collapse; text-align: left; }}
             th {{ background: #f1f5f9; padding: 12px; font-size: 13px; color: #475569; }}
-            .broadcast-box {{ background: #eff6ff; border: 1px solid #bfdbfe; padding: 24px; border-radius: 12px; margin-bottom: 24px; }}
-            textarea, select {{ width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #cbd5e1; margin-top: 8px; margin-bottom: 16px; box-sizing: border-box; }}
+            .broadcast-box {{ background: #eff6ff; border: 1.5px solid #bfdbfe; padding: 24px; border-radius: 12px; margin-bottom: 24px; }}
+            textarea, select, input[type="text"] {{ width: 100%; padding: 11px; border-radius: 8px; border: 1px solid #cbd5e1; margin-top: 6px; margin-bottom: 14px; box-sizing: border-box; font-family: inherit; font-size: 14px; }}
+            .pill-btn {{ background: white; border: 1px solid #cbd5e1; padding: 6px 12px; border-radius: 20px; font-size: 12px; cursor: pointer; margin-right: 6px; margin-bottom: 8px; font-weight: 500; }}
+            .pill-btn:hover {{ background: #dbeafe; border-color: #93c5fd; color: #1e40af; }}
+            .status-badge {{ padding: 3px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; text-transform: uppercase; }}
+            .status-pending {{ background: #fef3c7; color: #b45309; }}
+            .status-sent {{ background: #dcfce7; color: #15803d; }}
+            .status-failed {{ background: #fee2e2; color: #b91c1c; }}
+            .progress-bar-bg {{ background: #e2e8f0; border-radius: 8px; height: 10px; width: 100%; overflow: hidden; margin-top: 10px; }}
+            .progress-bar-fill {{ background: #22c55e; height: 100%; width: 0%; transition: width 0.4s ease; }}
         </style>
     </head>
     <body>
         <div class="container">
             <div class="header">
                 <div>
-                    <h1 style="margin:0 0 6px 0; font-size:22px;">🎓 Radhaballav Higher Secondary School</h1>
-                    <p style="margin:0; color:#64748b; font-size:14px;">WhatsApp Exam Bot Admin & Student Engagement Dashboard</p>
+                    <h1 style="margin:0 0 4px 0; font-size:22px;">🎓 Radhaballav Higher Secondary School</h1>
+                    <p style="margin:0; color:#64748b; font-size:14px;">WhatsApp Exam Bot Admin & Student Engagement Control Center</p>
                 </div>
-                <div>
-                    <a href="/admin/export-users" class="btn">📥 Export Verified Numbers (.csv)</a>
+                <div style="display:flex; gap:10px;">
+                    <a href="/admin/export-users" class="btn">📥 Export Student Numbers (.csv)</a>
                 </div>
             </div>
 
+            <!-- Student Metrics Cards -->
             <div class="grid">
                 <div class="card">
-                    <h3>Total Verified Users</h3>
+                    <h3>Verified WhatsApp Users</h3>
                     <div class="val" style="color:#2563eb;">{total_users}</div>
                 </div>
                 <div class="card">
@@ -439,24 +660,74 @@ def admin_dashboard():
                 </div>
             </div>
 
+            <!-- Broadcast Section -->
             <div class="broadcast-box">
-                <h2 style="margin-top:0; font-size:18px; color:#1e40af;">📢 Send Official Announcement / New Group Invite</h2>
-                <p style="color:#475569; font-size:14px; margin-bottom:16px;">Yahan se aap kisi bhi stream ke students ko exam ke baad WhatsApp Group join karne ka link ya college ka important notice bhej sakte hain.</p>
-                
-                <label><b>Select Target Audience:</b></label>
-                <select id="targetStream">
-                    <option value="All">All Verified Students ({total_users})</option>
-                    <option value="Science">Science Only ({sci_users})</option>
-                    <option value="Commerce">Commerce Only ({com_users})</option>
-                    <option value="Arts">Arts Only ({arts_users})</option>
-                </select>
+                <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; margin-bottom:12px;">
+                    <div>
+                        <h2 style="margin:0; font-size:19px; color:#1e40af;">📢 Send WhatsApp Broadcast to Students</h2>
+                        <p style="color:#475569; font-size:13px; margin:4px 0 0 0;">Yahan se verified students ko new WhatsApp Group link, exam notices ya marksheet alerts bhein.</p>
+                    </div>
+                    <div id="liveQueueBadge" style="background:white; border:1px solid #bfdbfe; padding:8px 14px; border-radius:8px; font-size:13px; font-weight:600;">
+                        ⏳ Pending in Queue: <span id="queuePendingCount" style="color:#d97706;">{b_pending}</span> | ✅ Sent: <span id="queueSentCount" style="color:#15803d;">{b_sent}</span>
+                    </div>
+                </div>
 
-                <label><b>Message Content (WhatsApp Formatted):</b></label>
-                <textarea id="msgBody" rows="5">🎓 *RADHABALLAV HIGHER SECONDARY SCHOOL*&#10;Namaskar! Aapke Half Yearly Exams safal rahe.&#10;College ke official class notes aur practical routines ke liye hamara naya WhatsApp Group join karein:&#10;👉 Link: https://chat.whatsapp.com/YourGroupLinkHere</textarea>
+                <div class="progress-bar-bg">
+                    <div id="broadcastProgress" class="progress-bar-fill"></div>
+                </div>
 
-                <button class="btn" onclick="alert('Broadcast queued successfully! Messages will be delivered via WhatsApp gateway.')">🚀 Send Broadcast to Students</button>
+                <div style="margin-top:16px;">
+                    <span style="font-size:13px; font-weight:600; color:#475569;">Quick Template chunein:</span><br>
+                    <button type="button" class="pill-btn" onclick="applyTemplate('group')">📋 WhatsApp Group Invite</button>
+                    <button type="button" class="pill-btn" onclick="applyTemplate('exam')">🗓️ Next Exam Notice</button>
+                    <button type="button" class="pill-btn" onclick="applyTemplate('result')">📊 Practical / Results Alert</button>
+                </div>
+
+                <div style="display:grid; grid-template-columns: 1fr 1fr; gap:14px; margin-top:10px;">
+                    <div>
+                        <label><b>Target Students Stream:</b></label>
+                        <select id="targetStream">
+                            <option value="All">All Verified Students ({total_users})</option>
+                            <option value="Science">Science Only ({sci_users})</option>
+                            <option value="Commerce">Commerce Only ({com_users})</option>
+                            <option value="Arts">Arts Only ({arts_users})</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label><b>Test on Single Phone Number (Optional):</b></label>
+                        <input type="text" id="testPhone" placeholder="Jaise: +919437280970 (Testing ke liye)" />
+                    </div>
+                </div>
+
+                <label><b>WhatsApp Message Body:</b></label>
+                <textarea id="msgBody" rows="5">🎓 *RADHABALLAV HIGHER SECONDARY SCHOOL*
+Namaskar students! Aapke Half Yearly Exams safal rahe.
+College ke official class notes aur practical routines ke liye hamara naya WhatsApp Group join karein:
+👉 Link: https://chat.whatsapp.com/YourGroupLinkHere</textarea>
+
+                <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+                    <button type="button" id="sendBtn" class="btn" onclick="triggerBroadcast(false)">
+                        🚀 Send Broadcast to Students
+                    </button>
+                    <button type="button" id="testBtn" class="btn btn-outline" onclick="triggerBroadcast(true)">
+                        🧪 Test Send on My Number
+                    </button>
+                    <span id="broadcastStatusMsg" style="font-size:14px; font-weight:600;"></span>
+                </div>
+
+                <!-- Recent Broadcast Queue Items -->
+                <div style="margin-top:20px; background:white; border-radius:8px; padding:14px; border:1px solid #e2e8f0;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                        <h4 style="margin:0; font-size:14px; color:#334155;">📬 Recent Queue Activity</h4>
+                        <button type="button" onclick="refreshQueueStatus()" style="background:none; border:none; color:#2563eb; cursor:pointer; font-size:12px; font-weight:600;">🔄 Refresh Status</button>
+                    </div>
+                    <div id="queueTableContainer" style="font-size:13px; color:#64748b;">
+                        Queue status load ho raha hai...
+                    </div>
+                </div>
             </div>
 
+            <!-- Verified Students Table -->
             <div class="table-box">
                 <h2 style="margin-top:0; font-size:18px;">📋 Recent Verified Student Queries</h2>
                 <table>
@@ -476,6 +747,121 @@ def admin_dashboard():
                 </table>
             </div>
         </div>
+
+        <script>
+            function applyTemplate(type) {{
+                const msgBox = document.getElementById('msgBody');
+                if (type === 'group') {{
+                    msgBox.value = "🎓 *RADHABALLAV HIGHER SECONDARY SCHOOL*\nNamaskar students! Aapke Half Yearly Exams safal rahe.\nCollege ke official class notes aur practical routines ke liye hamara naya WhatsApp Group join karein:\n👉 Group Link: https://chat.whatsapp.com/YourGroupLinkHere";
+                }} else if (type === 'exam') {{
+                    msgBox.value = "📢 *RBHS COLLEGE IMPORTANT NOTICE*\nKal ke exam ke liye sabhi students samay par pahuchein.\nSitting Time aur Allotted Hall dekhne ke liye bot par apna Roll Number type karke bhejein.\nAll the best! 👍";
+                }} else if (type === 'result') {{
+                    msgBox.value = "📊 *RBHS EXAM UPDATE*\nHalf Yearly Exam ke marks aur practical routine college notice board par display ho gaye hain.\nKisi bhi sahayata ke liye administrative office se sampark karein.";
+                }}
+            }}
+
+            async function triggerBroadcast(isTest) {{
+                const msg = document.getElementById('msgBody').value.trim();
+                const target = document.getElementById('targetStream').value;
+                const testPhone = document.getElementById('testPhone').value.trim();
+                const statusSpan = document.getElementById('broadcastStatusMsg');
+                const sendBtn = document.getElementById('sendBtn');
+                const testBtn = document.getElementById('testBtn');
+
+                if (!msg) {{
+                    alert('Message body khali nahi ho sakta!');
+                    return;
+                }}
+
+                if (isTest && !testPhone) {{
+                    alert('Kripya "Test on Single Phone Number" box me apna mobile number dalein (+91...)!');
+                    return;
+                }}
+
+                if (!isTest) {{
+                    const confirmSend = confirm(`Kya aap sach me stream "${{target}}" ke sabhi students ko yeh WhatsApp message bhejna chahte hain?`);
+                    if (!confirmSend) return;
+                }}
+
+                sendBtn.disabled = true;
+                testBtn.disabled = true;
+                statusSpan.style.color = '#2563eb';
+                statusSpan.innerText = '⏳ Queueing messages...';
+
+                try {{
+                    const payload = {{
+                        target: target,
+                        message: msg,
+                        test_phone: isTest ? testPhone : ''
+                    }};
+
+                    const res = await fetch('/admin/send-broadcast', {{
+                        method: 'POST',
+                        headers: {{ 'Content-Type': 'application/json' }},
+                        body: JSON.stringify(payload)
+                    }});
+
+                    const data = await res.json();
+                    if (data.success) {{
+                        statusSpan.style.color = '#16a34a';
+                        statusSpan.innerText = data.message;
+                        refreshQueueStatus();
+                    }} else {{
+                        statusSpan.style.color = '#dc2626';
+                        statusSpan.innerText = '❌ Error: ' + (data.error || 'Failed to queue');
+                    }}
+                }} catch (err) {{
+                    statusSpan.style.color = '#dc2626';
+                    statusSpan.innerText = '❌ Server connection failed: ' + err.message;
+                }} finally {{
+                    sendBtn.disabled = false;
+                    testBtn.disabled = false;
+                }}
+            }}
+
+            async function refreshQueueStatus() {{
+                try {{
+                    const res = await fetch('/admin/broadcast-status');
+                    const data = await res.json();
+
+                    document.getElementById('queuePendingCount').innerText = data.pending;
+                    document.getElementById('queueSentCount').innerText = data.sent;
+
+                    const total = data.total || 0;
+                    const sent = data.sent || 0;
+                    const pct = total > 0 ? Math.round((sent / total) * 100) : 0;
+                    document.getElementById('broadcastProgress').style.width = pct + '%';
+
+                    const container = document.getElementById('queueTableContainer');
+                    if (!data.recent || data.recent.length === 0) {{
+                        container.innerHTML = '<i>Abhi koi broadcast queue me nahi hai.</i>';
+                        return;
+                    }}
+
+                    let tHtml = '<table style="width:100%; border-collapse:collapse;"><thead><tr style="text-align:left; border-bottom:1px solid #e2e8f0;"><th style="padding:6px;">Mobile</th><th style="padding:6px;">Name</th><th style="padding:6px;">Status</th><th style="padding:6px;">Sent Time</th></tr></thead><tbody>';
+                    for (const item of data.recent) {{
+                        const badgeClass = item.status === 'SENT' ? 'status-sent' : (item.status === 'FAILED' ? 'status-failed' : 'status-pending');
+                        const sTime = item.sent_at ? String(item.sent_at).slice(0, 19) : (item.created_at ? String(item.created_at).slice(0, 19) : 'Pending');
+                        tHtml += `
+                        <tr style="border-bottom:1px solid #f1f5f9;">
+                            <td style="padding:6px; font-family:monospace; font-weight:bold;">${{item.phone}}</td>
+                            <td style="padding:6px;">${{item.name || 'Student'}}</td>
+                            <td style="padding:6px;"><span class="status-badge ${{badgeClass}}">${{item.status}}</span></td>
+                            <td style="padding:6px; color:#64748b; font-size:12px;">${{sTime}}</td>
+                        </tr>
+                        `;
+                    }}
+                    tHtml += '</tbody></table>';
+                    container.innerHTML = tHtml;
+                }} catch (e) {{
+                    console.error('Queue poll error:', e);
+                }}
+            }}
+
+            // Poll queue status every 4 seconds
+            refreshQueueStatus();
+            setInterval(refreshQueueStatus, 4000);
+        </script>
     </body>
     </html>
     """

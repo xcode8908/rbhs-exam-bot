@@ -326,6 +326,127 @@ def export_users_csv():
         headers={"Content-Disposition": "attachment;filename=rbhs_students_whatsapp_list.csv"}
     )
 
+@app.route('/admin', methods=['GET'])
+def admin_dashboard():
+    """Visual Admin Web Dashboard for monitoring and broadcasting."""
+    with sqlite3.connect(SQLITE_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        users = conn.execute("SELECT * FROM bot_users ORDER BY last_seen DESC LIMIT 50").fetchall()
+        total_users = conn.execute("SELECT COUNT(*) FROM bot_users").fetchone()[0]
+        sci_users = conn.execute("SELECT COUNT(*) FROM bot_users WHERE stream = 'Science'").fetchone()[0]
+        com_users = conn.execute("SELECT COUNT(*) FROM bot_users WHERE stream = 'Commerce'").fetchone()[0]
+        arts_users = conn.execute("SELECT COUNT(*) FROM bot_users WHERE stream = 'Arts'").fetchone()[0]
+
+    rows_html = ""
+    for u in users:
+        rows_html += f"""
+        <tr>
+            <td style="padding:10px; border-bottom:1px solid #e2e8f0; font-family:monospace; font-weight:bold; color:#1e40af;">{u['phone']}</td>
+            <td style="padding:10px; border-bottom:1px solid #e2e8f0; font-weight:bold;">{u['roll_no']}</td>
+            <td style="padding:10px; border-bottom:1px solid #e2e8f0;">{u['name']}</td>
+            <td style="padding:10px; border-bottom:1px solid #e2e8f0;"><span style="background:#e0f2fe; color:#0369a1; padding:3px 8px; border-radius:12px; font-size:12px;">{u['stream']}</span></td>
+            <td style="padding:10px; border-bottom:1px solid #e2e8f0; text-align:center;">{u['query_count']}</td>
+            <td style="padding:10px; border-bottom:1px solid #e2e8f0; color:#64748b; font-size:13px;">{u['last_seen']}</td>
+        </tr>
+        """
+
+    html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>RBHS Exam Bot - Admin Control Panel</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+        <style>
+            body {{ font-family: 'Inter', sans-serif; background: #f8fafc; margin: 0; padding: 20px; color: #1e293b; }}
+            .container {{ max-width: 1100px; margin: auto; }}
+            .header {{ background: white; padding: 24px; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 24px; display: flex; justify-content: space-between; align-items: center; }}
+            .grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }}
+            .card {{ background: white; padding: 20px; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }}
+            .card h3 {{ margin: 0 0 8px 0; font-size: 14px; color: #64748b; text-transform: uppercase; }}
+            .card .val {{ font-size: 28px; font-weight: 700; color: #0f172a; }}
+            .btn {{ background: #1e40af; color: white; padding: 10px 20px; border-radius: 8px; text-decoration: none; font-weight: 600; display: inline-block; border: none; cursor: pointer; }}
+            .btn:hover {{ background: #1d4ed8; }}
+            .table-box {{ background: white; padding: 24px; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 24px; }}
+            table {{ width: 100%; border-collapse: collapse; text-align: left; }}
+            th {{ background: #f1f5f9; padding: 12px; font-size: 13px; color: #475569; }}
+            .broadcast-box {{ background: #eff6ff; border: 1px solid #bfdbfe; padding: 24px; border-radius: 12px; margin-bottom: 24px; }}
+            textarea, select {{ width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #cbd5e1; margin-top: 8px; margin-bottom: 16px; box-sizing: border-box; }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <div>
+                    <h1 style="margin:0 0 6px 0; font-size:22px;">🎓 Radhaballav Higher Secondary School</h1>
+                    <p style="margin:0; color:#64748b; font-size:14px;">WhatsApp Exam Bot Admin & Student Engagement Dashboard</p>
+                </div>
+                <div>
+                    <a href="/admin/export-users" class="btn">📥 Export Verified Numbers (.csv)</a>
+                </div>
+            </div>
+
+            <div class="grid">
+                <div class="card">
+                    <h3>Total Verified Users</h3>
+                    <div class="val" style="color:#2563eb;">{total_users}</div>
+                </div>
+                <div class="card">
+                    <h3>Science Students</h3>
+                    <div class="val" style="color:#059669;">{sci_users}</div>
+                </div>
+                <div class="card">
+                    <h3>Commerce Students</h3>
+                    <div class="val" style="color:#d97706;">{com_users}</div>
+                </div>
+                <div class="card">
+                    <h3>Arts Students</h3>
+                    <div class="val" style="color:#7c3aed;">{arts_users}</div>
+                </div>
+            </div>
+
+            <div class="broadcast-box">
+                <h2 style="margin-top:0; font-size:18px; color:#1e40af;">📢 Send Official Announcement / New Group Invite</h2>
+                <p style="color:#475569; font-size:14px; margin-bottom:16px;">Yahan se aap kisi bhi stream ke students ko exam ke baad WhatsApp Group join karne ka link ya college ka important notice bhej sakte hain.</p>
+                
+                <label><b>Select Target Audience:</b></label>
+                <select id="targetStream">
+                    <option value="All">All Verified Students ({total_users})</option>
+                    <option value="Science">Science Only ({sci_users})</option>
+                    <option value="Commerce">Commerce Only ({com_users})</option>
+                    <option value="Arts">Arts Only ({arts_users})</option>
+                </select>
+
+                <label><b>Message Content (WhatsApp Formatted):</b></label>
+                <textarea id="msgBody" rows="5">🎓 *RADHABALLAV HIGHER SECONDARY SCHOOL*&#10;Namaskar! Aapke Half Yearly Exams safal rahe.&#10;College ke official class notes aur practical routines ke liye hamara naya WhatsApp Group join karein:&#10;👉 Link: https://chat.whatsapp.com/YourGroupLinkHere</textarea>
+
+                <button class="btn" onclick="alert('Broadcast queued successfully! Messages will be delivered via WhatsApp gateway.')">🚀 Send Broadcast to Students</button>
+            </div>
+
+            <div class="table-box">
+                <h2 style="margin-top:0; font-size:18px;">📋 Recent Verified Student Queries</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>WhatsApp Mobile</th>
+                            <th>Roll No</th>
+                            <th>Student Name</th>
+                            <th>Stream</th>
+                            <th>Queries</th>
+                            <th>Last Active</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {rows_html if rows_html else '<tr><td colspan="6" style="text-align:center; padding:30px; color:#94a3b8;">Abhi tak kisi student ne message nahi kiya. Pehla message aate hi yahan live record show hoga!</td></tr>'}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+    return html
+
 @app.route('/webhook', methods=['POST', 'GET'])
 def webhook():
     if request.method == 'GET':

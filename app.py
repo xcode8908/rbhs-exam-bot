@@ -2,6 +2,7 @@ import os
 import json
 import re
 from datetime import datetime
+import threading
 import requests
 from flask import Flask, request, jsonify
 
@@ -100,12 +101,13 @@ SCHEDULE = {
 
 
 def send_telegram_admin_alert(sender_phone, student_name, roll_no, stream_class, room, user_msg):
-    """Sends immediate Telegram alert to Admin whenever a student queries the bot."""
+    """Sends immediate Telegram alert to Admin in a non-blocking background thread."""
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_ADMIN_CHAT_ID:
         return
-        
-    now_str = datetime.now().strftime("%d-%b-%Y %I:%M:%S %p")
-    text = f"""🔔 *NEW EXAM BOT QUERY ALERT*
+
+    def _send():
+        now_str = datetime.now().strftime("%d-%b-%Y %I:%M:%S %p")
+        text = f"""🔔 *NEW EXAM BOT QUERY ALERT*
 ━━━━━━━━━━━━━━━━━━━━━━━━━
 📱 *Student Phone:* `{sender_phone}`
 👤 *Student Name:* {student_name}
@@ -116,16 +118,19 @@ def send_telegram_admin_alert(sender_phone, student_name, roll_no, stream_class,
 🕒 *Time:* {now_str}
 ━━━━━━━━━━━━━━━━━━━━━━━━━"""
 
-    try:
-        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-        payload = {
-            "chat_id": TELEGRAM_ADMIN_CHAT_ID,
-            "text": text,
-            "parse_mode": "Markdown"
-        }
-        requests.post(url, json=payload, timeout=5)
-    except Exception as e:
-        print(f"Telegram Alert Error: {e}")
+        try:
+            url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+            payload = {
+                "chat_id": TELEGRAM_ADMIN_CHAT_ID,
+                "text": text,
+                "parse_mode": "Markdown"
+            }
+            requests.post(url, json=payload, timeout=5)
+        except Exception as e:
+            print(f"Telegram Alert Error: {e}")
+
+    # Launch in background thread so HTTP response returns instantly
+    threading.Thread(target=_send, daemon=True).start()
 
 
 def process_bot_query(raw_text, sender_phone="Unknown"):

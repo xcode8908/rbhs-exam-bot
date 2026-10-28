@@ -175,10 +175,10 @@ def log_user_interaction(phone, roll_no, name, stream, class_year, raw_msg):
                 query_count = bot_users.query_count + 1,
                 last_seen = CURRENT_TIMESTAMP,
                 last_query = EXCLUDED.last_query,
-                roll_no = COALESCE(EXCLUDED.roll_no, bot_users.roll_no),
-                name = COALESCE(EXCLUDED.name, bot_users.name),
-                stream = COALESCE(EXCLUDED.stream, bot_users.stream),
-                class_year = COALESCE(EXCLUDED.class_year, bot_users.class_year);
+                roll_no = CASE WHEN EXCLUDED.roll_no NOT IN ('GUEST', '') THEN EXCLUDED.roll_no ELSE bot_users.roll_no END,
+                name = CASE WHEN EXCLUDED.name NOT IN ('New Student Visitor', '') THEN EXCLUDED.name ELSE bot_users.name END,
+                stream = CASE WHEN EXCLUDED.stream NOT IN ('Unknown', '') THEN EXCLUDED.stream ELSE bot_users.stream END,
+                class_year = CASE WHEN EXCLUDED.class_year NOT IN ('Unknown', '') THEN EXCLUDED.class_year ELSE bot_users.class_year END;
             """
             requests.post(neon_url, json={"query": sql}, headers=headers, timeout=5)
         except Exception as err:

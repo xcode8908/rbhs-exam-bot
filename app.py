@@ -333,6 +333,17 @@ def health():
         "telegram_notifications": bool(TELEGRAM_BOT_TOKEN and TELEGRAM_ADMIN_CHAT_ID)
     })
 
+@app.route('/admin/whatsapp-status', methods=['GET'])
+def admin_whatsapp_status():
+    """Checks the internal Node.js WhatsApp Gateway health."""
+    try:
+        r = requests.get('http://127.0.0.1:5050/status', timeout=2)
+        if r.status_code == 200:
+            return jsonify(r.json())
+    except:
+        pass
+    return jsonify({"isConnected": False, "connectedUser": None, "hasQR": False})
+
 @app.route('/admin/users', methods=['GET'])
 def get_bot_users():
     """Returns JSON list of all students who used the bot."""
@@ -637,7 +648,11 @@ def admin_dashboard():
                     <h1 style="margin:0 0 4px 0; font-size:22px;">🎓 Radhaballav Higher Secondary School</h1>
                     <p style="margin:0; color:#64748b; font-size:14px;">WhatsApp Exam Bot Admin & Student Engagement Control Center</p>
                 </div>
-                <div style="display:flex; gap:10px;">
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <div id="wa-status-pill" style="background:#f1f5f9; color:#475569; border:1px solid #cbd5e1; padding:8px 14px; border-radius:20px; font-size:13px; font-weight:600; display:flex; align-items:center; gap:8px;">
+                        <span id="wa-dot" style="height:9px; width:9px; background:#94a3b8; border-radius:50%; display:inline-block;"></span>
+                        <span id="wa-status-text">Cloud WhatsApp: Checking...</span>
+                    </div>
                     <a href="/admin/export-users" class="btn">📥 Export Student Numbers (.csv)</a>
                 </div>
             </div>
@@ -863,6 +878,41 @@ College ke official class notes aur practical routines ke liye hamara naya Whats
             // Poll queue status every 4 seconds
             refreshQueueStatus();
             setInterval(refreshQueueStatus, 4000);
+
+            // Poll Cloud WhatsApp status every 5 seconds
+            async function checkWaStatus() {{
+                try {{
+                    const r = await fetch('/admin/whatsapp-status');
+                    const d = await r.json();
+                    const pill = document.getElementById('wa-status-pill');
+                    const dot = document.getElementById('wa-dot');
+                    const text = document.getElementById('wa-status-text');
+                    if (d.isConnected) {{
+                        pill.style.background = '#dcfce7';
+                        pill.style.color = '#15803d';
+                        pill.style.borderColor = '#86efac';
+                        dot.style.background = '#22c55e';
+                        dot.style.boxShadow = '0 0 6px #22c55e';
+                        text.innerText = '🟢 Cloud WhatsApp: Connected (' + (d.connectedUser || 'Active') + ')';
+                    }} else if (d.hasQR) {{
+                        pill.style.background = '#fef3c7';
+                        pill.style.color = '#b45309';
+                        pill.style.borderColor = '#fcd34d';
+                        dot.style.background = '#f59e0b';
+                        dot.style.boxShadow = 'none';
+                        text.innerText = '🟡 WhatsApp: QR Scan Needed';
+                    }} else {{
+                        pill.style.background = '#fee2e2';
+                        pill.style.color = '#b91c1c';
+                        pill.style.borderColor = '#fca5a5';
+                        dot.style.background = '#ef4444';
+                        dot.style.boxShadow = 'none';
+                        text.innerText = '🔴 WhatsApp Cloud Bridge: Connecting...';
+                    }}
+                }} catch (e) {{}}
+            }}
+            checkWaStatus();
+            setInterval(checkWaStatus, 5000);
         </script>
     </body>
     </html>

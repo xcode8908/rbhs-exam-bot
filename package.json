@@ -1,0 +1,15 @@
+{
+  "name": "render_exam_bot",
+  "version": "1.0.0",
+  "description": "RBHS WhatsApp Bot on Render Cloud",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "^7.0.0-rc14",
+    "axios": "^1.21.0",
+    "express": "^4.19.2",
+    "qrcode": "^1.5.4"
+  }
+}

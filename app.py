@@ -233,8 +233,8 @@ def send_telegram_admin_alert(sender_phone, student_name, roll_no, stream_class,
 def process_bot_query(raw_text, sender_phone="Unknown"):
     text = raw_text.strip().upper()
     
-    # Smart Regex Matcher
-    match = re.search(r'\b(I[ASC])\s*[-]?\s*(2[56])\s*[-]?\s*(\d{1,3})\b', text, re.IGNORECASE)
+    # Smart Regex Matcher: catches IA/IS/IC (or A/S/C) + 25/26 + 1 to 4 digits
+    match = re.search(r'\b(I?[ASC])\s*[-]?\s*(2[56])\s*[-]?\s*(\d{1,4})\b', text, re.IGNORECASE)
     
     if not match:
         # Log unknown / greeting query
@@ -251,8 +251,10 @@ Exam Subject, Time aur Hall No. janne ke liye apna Roll Number bhejein:
 👇 *Apna Roll Number type karke bhejein:*"""
 
     stream = match.group(1).upper()
+    if not stream.startswith('I'):
+        stream = 'I' + stream
     yr = match.group(2)
-    num = match.group(3).zfill(3)
+    num = str(int(match.group(3))).zfill(3)
     lookup_key = f"{stream}{yr}-{num}"
     
     if lookup_key not in STUDENT_DB:

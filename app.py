@@ -16,8 +16,64 @@ BASE_DIR = os.path.dirname(__file__)
 DB_PATH = os.path.join(BASE_DIR, 'STUDENTS_WHATSAPP_BOT_DATABASE.json')
 SQLITE_PATH = os.path.join(BASE_DIR, 'bot_interactions.db')
 
-with open(DB_PATH, 'r', encoding='utf-8') as f:
-    STUDENT_DB = json.load(f)
+# Neon Cloud Serverless Database Connection
+NEON_URL = "https://ep-patient-dream-b30yv2xq-pooler.c-4.ap-southeast-1.aws.neon.tech/sql"
+NEON_CONN = os.environ.get("DATABASE_URL", "postgresql://neondb_owner:npg_DTfk4PM9dewh@ep-patient-dream-b30yv2xq-pooler.c-4.ap-southeast-1.aws.neon.tech/neondb?sslmode=require")
+
+def neon_query(sql, return_rows=False):
+    """Executes SQL against Neon Serverless PostgreSQL over HTTP."""
+    headers = {
+        "Neon-Connection-String": NEON_CONN,
+        "Content-Type": "application/json"
+    }
+    try:
+        res = requests.post(NEON_URL, json={"query": sql}, headers=headers, timeout=8)
+        if res.status_code == 200:
+            if return_rows:
+                return res.json().get("rows", [])
+            return True
+        return [] if return_rows else False
+    except Exception as err:
+        print(f"Neon query error: {err}")
+        return [] if return_rows else False
+
+def load_students_from_neon():
+    """Loads all student master records directly from Neon Cloud PostgreSQL."""
+    try:
+        sql = "SELECT roll_no, name, stream, class_year, batch, is_tc, status, hall_no, exam_timing, subjects FROM students;"
+        rows = neon_query(sql, return_rows=True)
+        if rows and len(rows) > 0:
+            db = {}
+            for r in rows:
+                roll = r['roll_no']
+                clean = roll.upper()
+                subjs = [s.strip() for s in (r.get('subjects') or '').split(',') if s.strip()]
+                st_data = {
+                    'roll_no': roll,
+                    'name': r['name'],
+                    'stream': r['stream'],
+                    'class_year': r['class_year'],
+                    'batch': r.get('batch', ''),
+                    'is_tc': bool(r.get('is_tc')),
+                    'status': r.get('status', 'ACTIVE'),
+                    'subjects': subjs,
+                    'subjects_formatted': "\n".join([f"  • {s}" for s in subjs]),
+                    'hall_no': r.get('hall_no', 'Not Assigned'),
+                    'exam_timing': r.get('exam_timing', 'Check Notice')
+                }
+                db[clean] = st_data
+                db[clean.replace('-', '')] = st_data
+            print(f"✅ Loaded {len(rows)} student records directly from Neon Cloud PostgreSQL!")
+            return db
+    except Exception as e:
+        print(f"Neon initial load error: {e}")
+    return None
+
+STUDENT_DB = load_students_from_neon()
+if not STUDENT_DB:
+    with open(DB_PATH, 'r', encoding='utf-8') as f:
+        STUDENT_DB = json.load(f)
+    print(f"Loaded {len(STUDENT_DB)} records from local JSON fallback.")
 
 # Initialize SQLite database for tracking users & interactions
 def init_db():
@@ -258,6 +314,31 @@ Exam Subject, Time aur Hall No. janne ke liye apna Roll Number bhejein:
     lookup_key = f"{stream}{yr}-{num}"
     
     if lookup_key not in STUDENT_DB:
+        # Live Query Neon Cloud Database in real-time
+        try:
+            clean_search = lookup_key.replace('-', '')
+            sql = f"SELECT roll_no, name, stream, class_year, batch, is_tc, status, hall_no, exam_timing, subjects FROM students WHERE UPPER(roll_no) = '{lookup_key}' OR REPLACE(UPPER(roll_no), '-', '') = '{clean_search}' LIMIT 1;"
+            rows = neon_query(sql, return_rows=True)
+            if rows and len(rows) > 0:
+                r = rows[0]
+                subjs = [s.strip() for s in (r.get('subjects') or '').split(',') if s.strip()]
+                STUDENT_DB[lookup_key] = {
+                    'roll_no': r['roll_no'],
+                    'name': r['name'],
+                    'stream': r['stream'],
+                    'class_year': r['class_year'],
+                    'batch': r.get('batch', ''),
+                    'is_tc': bool(r.get('is_tc')),
+                    'status': r.get('status', 'ACTIVE'),
+                    'subjects': subjs,
+                    'subjects_formatted': "\n".join([f"  • {s}" for s in subjs]),
+                    'hall_no': r.get('hall_no', 'Not Assigned'),
+                    'exam_timing': r.get('exam_timing', 'Check Notice')
+                }
+        except Exception as e:
+            print(f"Neon live lookup error: {e}")
+
+    if lookup_key not in STUDENT_DB:
         log_user_interaction(sender_phone, lookup_key, "Unknown", stream, f"Year-{yr}", raw_text)
         send_telegram_admin_alert(sender_phone, "UNKNOWN STUDENT", lookup_key, "Unknown", "None", raw_text)
         return f"❌ *Record Not Found!* Roll No *{lookup_key}* hamare college record me nahi mila.\n\nKripya apna Roll No check karke dobara bhejein."
@@ -328,6 +409,7 @@ def health():
     return jsonify({
         "status": "online",
         "service": "RBHS WhatsApp Student Exam Bot",
+        "primary_database": "Neon Serverless PostgreSQL Cloud Database",
         "total_enrolled_records": len(STUDENT_DB),
         "total_students_used_bot": users_count,
         "telegram_notifications": bool(TELEGRAM_BOT_TOKEN and TELEGRAM_ADMIN_CHAT_ID)
@@ -365,24 +447,6 @@ def get_bot_users():
         "users": users
     })
 
-def neon_query(sql, return_rows=False):
-    """Executes SQL against Neon Serverless PostgreSQL over HTTP."""
-    neon_url = "https://ep-patient-dream-b30yv2xq-pooler.c-4.ap-southeast-1.aws.neon.tech/sql"
-    neon_conn = os.environ.get("DATABASE_URL", "postgresql://neondb_owner:npg_DTfk4PM9dewh@ep-patient-dream-b30yv2xq-pooler.c-4.ap-southeast-1.aws.neon.tech/neondb?sslmode=require")
-    headers = {
-        "Neon-Connection-String": neon_conn,
-        "Content-Type": "application/json"
-    }
-    try:
-        res = requests.post(neon_url, json={"query": sql}, headers=headers, timeout=6)
-        if res.status_code == 200:
-            if return_rows:
-                return res.json().get("rows", [])
-            return True
-        return [] if return_rows else False
-    except Exception as err:
-        print(f"Neon query error: {err}")
-        return [] if return_rows else False
 
 
 @app.route('/admin/export-users', methods=['GET'])

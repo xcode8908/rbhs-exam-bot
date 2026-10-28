@@ -127,10 +127,12 @@ SCHEDULE = {
 
 
 def log_user_interaction(phone, roll_no, name, stream, class_year, raw_msg):
-    """Saves student interaction to SQLite database for future broadcast & group invites."""
+    """Saves student interaction to SQLite and Neon PostgreSQL cloud database."""
     if not phone or phone == 'Unknown':
         return
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    # 1. Local SQLite storage
     try:
         with sqlite3.connect(SQLITE_PATH) as conn:
             conn.execute("""
@@ -147,7 +149,42 @@ def log_user_interaction(phone, roll_no, name, stream, class_year, raw_msg):
             """, (phone, roll_no, name, stream, class_year, now_str, now_str, raw_msg, now_str, raw_msg, roll_no, name, stream, class_year))
             conn.commit()
     except Exception as e:
-        print(f"Error logging interaction: {e}")
+        print(f"SQLite log error: {e}")
+
+    # 2. Neon Serverless PostgreSQL Cloud Sync (Background Thread)
+    def _sync_neon():
+        try:
+            neon_url = "https://ep-patient-dream-b30yv2xq-pooler.c-4.ap-southeast-1.aws.neon.tech/sql"
+            neon_conn = os.environ.get("DATABASE_URL", "postgresql://neondb_owner:npg_DTfk4PM9dewh@ep-patient-dream-b30yv2xq-pooler.c-4.ap-southeast-1.aws.neon.tech/neondb?sslmode=require")
+            headers = {
+                "Neon-Connection-String": neon_conn,
+                "Content-Type": "application/json"
+            }
+            # Clean single quotes for SQL safety
+            c_phone = phone.replace("'", "''")
+            c_roll = (roll_no or '').replace("'", "''")
+            c_name = (name or '').replace("'", "''")
+            c_stream = (stream or '').replace("'", "''")
+            c_class = (class_year or '').replace("'", "''")
+            c_msg = (raw_msg or '').replace("'", "''")
+
+            sql = f"""
+            INSERT INTO bot_users (phone, roll_no, name, stream, class_year, query_count, first_seen, last_seen, last_query)
+            VALUES ('{c_phone}', '{c_roll}', '{c_name}', '{c_stream}', '{c_class}', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{c_msg}')
+            ON CONFLICT (phone) DO UPDATE SET
+                query_count = bot_users.query_count + 1,
+                last_seen = CURRENT_TIMESTAMP,
+                last_query = EXCLUDED.last_query,
+                roll_no = COALESCE(EXCLUDED.roll_no, bot_users.roll_no),
+                name = COALESCE(EXCLUDED.name, bot_users.name),
+                stream = COALESCE(EXCLUDED.stream, bot_users.stream),
+                class_year = COALESCE(EXCLUDED.class_year, bot_users.class_year);
+            """
+            requests.post(neon_url, json={"query": sql}, headers=headers, timeout=5)
+        except Exception as err:
+            print(f"Neon Postgres sync error: {err}")
+
+    threading.Thread(target=_sync_neon, daemon=True).start()
 
 
 def send_telegram_admin_alert(sender_phone, student_name, roll_no, stream_class, room, user_msg):

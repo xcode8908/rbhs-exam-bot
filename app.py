@@ -226,19 +226,28 @@ def process_bot_query(raw_text, sender_phone="Unknown"):
     match = re.search(r'\b(I[ASC])\s*[-]?\s*(2[56])\s*[-]?\s*(\d{1,3})\b', text, re.IGNORECASE)
     
     if not match:
-        # Log unknown query
-        log_user_interaction(sender_phone, "GUEST", "Guest Visitor", "Unknown", "Unknown", raw_text)
-        return """🙏 *Namaskar! Radhaballav Higher Secondary School Exam Bot me aapka swagat hai.*
+        # Log unknown / greeting query
+        log_user_interaction(sender_phone, "GUEST", "New Student Visitor", "Unknown", "Unknown", raw_text)
+        return """🙏 *NAMASKAR! RADHABALLAV HIGHER SECONDARY SCHOOL*
+━━━━━━━━━━━━━━━━━━━━━━━━━
+🤖 *EXAM HELPDESK 24x7 BOT ME AAPKA SWAGAT HAI*
 
-Apne *Aaj ke Exam ka Subject aur Hall No.* dekhne ke liye bus apna *Roll Number* type karke bhejein:
+Ye bot aapko aapke Exam ka *Subject*, *Sitting Time* aur *Allotted Hall No.* turant batata hai!
 
-👉 *Examples:*
-• *2nd Year Science:* IS25-001 ya is25001
-• *2nd Year Arts:* IA25-015 ya ia25015
-• *2nd Year Commerce:* IC25-005 ya ic25005
-• *1st Year Science:* IS26-001 ya is26001
-• *1st Year Arts:* IA26-015 ya ia26015
-• *1st Year Commerce:* IC26-005 ya ic26005"""
+📖 *KAISE USE KAREIN (EASY GUIDE):*
+Bus apna Roll Number type karke bhejein. Chota ya bada letter, dash (-) lagayein ya na lagayein, sab chalega!
+
+👉 *Examples (Apne Stream Ke Anusaar Bhejein):*
+• *Arts 1st Year:* `ia26015` ya `IA26-015`
+• *Science 1st Year:* `is26001` ya `IS26-001`
+• *Commerce 1st Year:* `ic26005` ya `IC26-005`
+
+• *Arts 2nd Year:* `ia25015` ya `IA25-015`
+• *Science 2nd Year:* `is25001` ya `IS25-001`
+• *Commerce 2nd Year:* `ic25005` ya `IC25-005`
+
+━━━━━━━━━━━━━━━━━━━━━━━━━
+👇 *Abhi apna Roll Number neeche type karke bhejein:*"""
 
     stream = match.group(1).upper()
     yr = match.group(2)

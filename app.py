@@ -228,31 +228,16 @@ def process_bot_query(raw_text, sender_phone="Unknown"):
     if not match:
         # Log unknown / greeting query
         log_user_interaction(sender_phone, "GUEST", "New Student Visitor", "Unknown", "Unknown", raw_text)
-        return """🙏 *NAMASKAR! RADHABALLAV HIGHER SECONDARY SCHOOL*
-━━━━━━━━━━━━━━━━━━━━━━━━━
-🤖 *EXAM HELPDESK 24x7 BOT ME AAPKA SWAGAT HAI*
+        return """🙏 *Radhaballav H.S. School Exam Bot*
+Exam Subject, Time aur Hall No. janne ke liye apna Roll Number bhejein:
 
-Ye bot aapko aapke Exam ka *Subject*, *Sitting Time* aur *Allotted Hall No.* turant batata hai!
+👉 *Examples (1st & 2nd Year):*
+🧪 *Science:* `IS26-001` / `IS25-001`
+💼 *Commerce:* `IC26-005` / `IC25-005`
+🎨 *Arts:* `IA26-015` / `IA25-015`
+*(Chota letter ya bina dash ke bhi chalega: is26001)*
 
-📖 *KAISE USE KAREIN:*
-Bus apna Roll Number type karke bhejein. Dash (-) lagayein ya na lagayein, chota ya bada letter sab chalega!
-
-📋 *APNE STREAM KA ROLL NUMBER EXAMPLE DEKHEIN:*
-
-🧪 *SCIENCE STREAM:*
-   • +2 1st Year: `IS26-001` (ya `is26001`)
-   • +2 2nd Year: `IS25-001` (ya `is25001`)
-
-💼 *COMMERCE STREAM:*
-   • +2 1st Year: `IC26-005` (ya `ic26005`)
-   • +2 2nd Year: `IC25-005` (ya `ic25005`)
-
-🎨 *ARTS STREAM:*
-   • +2 1st Year: `IA26-015` (ya `ia26015`)
-   • +2 2nd Year: `IA25-015` (ya `ia25015`)
-
-━━━━━━━━━━━━━━━━━━━━━━━━━
-👇 *Abhi apna Roll Number neeche type karke bhejein:*"""
+👇 *Apna Roll Number type karke bhejein:*"""
 
     stream = match.group(1).upper()
     yr = match.group(2)
@@ -301,20 +286,18 @@ Kisi bhi query ke liye college administrative office se sampark karein."""
         user_msg=raw_text
     )
 
-    reply = f"""🎓 *RADHABALLAV HIGHER SECONDARY SCHOOL*
--------------------------------------------------
-👤 *Name:* {st['name']}
-🆔 *Roll No:* {st['roll_no']}  |  {st['class_year']} ({st['stream']})
-
-📌 *AAJ KA EXAM ({day_info['label']}):*
+    subjs_line = ", ".join(st['subjects']) if st.get('subjects') else 'None'
+    reply = f"""🎓 *Radhaballav H.S. School*
+👤 *{st['name']}* (`{st['roll_no']}`)
+🏛 {st['class_year']} ({st['stream']})
+━━━━━━━━━━━━━━━━━━━━
+📌 *AAJ KA EXAM:*
 📖 *Subject:* {subject_today}
-⏰ *Time:* {sitting_time}
-📍 *Allotted Hall:* {hall_no}
-
-📚 *Aapke Registered Subjects:*
-{st['subjects_formatted']}
--------------------------------------------------
-⚠️ *Notice:* Exam shuru hone se 15 minute pehle hall me pahuchein! 👍"""
+📍 *Allotted Room:* *{hall_no}*
+⏰ *Sitting Time:* {sitting_time}
+━━━━━━━━━━━━━━━━━━━━
+📚 *Subjects:* {subjs_line}
+⚠️ 15 min pehle hall me pahuchein! 👍"""
 
     return reply
 

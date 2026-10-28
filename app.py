@@ -3,17 +3,43 @@ import json
 import re
 from datetime import datetime
 import threading
+import sqlite3
+import csv
+import io
 import requests
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, Response
 
 app = Flask(__name__)
 
-# Load local student database
-DB_PATH = os.path.join(os.path.dirname(__file__), 'STUDENTS_WHATSAPP_BOT_DATABASE.json')
+# Base directory & DB Paths
+BASE_DIR = os.path.dirname(__file__)
+DB_PATH = os.path.join(BASE_DIR, 'STUDENTS_WHATSAPP_BOT_DATABASE.json')
+SQLITE_PATH = os.path.join(BASE_DIR, 'bot_interactions.db')
+
 with open(DB_PATH, 'r', encoding='utf-8') as f:
     STUDENT_DB = json.load(f)
 
-# Environment variables for Telegram Admin Notification
+# Initialize SQLite database for tracking users & interactions
+def init_db():
+    with sqlite3.connect(SQLITE_PATH) as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS bot_users (
+                phone TEXT PRIMARY KEY,
+                roll_no TEXT,
+                name TEXT,
+                stream TEXT,
+                class_year TEXT,
+                query_count INTEGER DEFAULT 1,
+                first_seen TEXT,
+                last_seen TEXT,
+                last_query TEXT
+            )
+        """)
+        conn.commit()
+
+init_db()
+
+# Environment variables
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "8965596009:AAHRANWd1oJpVapa7tHmVJqi3oXbdt-nCsI")
 TELEGRAM_ADMIN_CHAT_ID = os.environ.get("TELEGRAM_ADMIN_CHAT_ID", "6161463701")
 
@@ -100,6 +126,30 @@ SCHEDULE = {
 }
 
 
+def log_user_interaction(phone, roll_no, name, stream, class_year, raw_msg):
+    """Saves student interaction to SQLite database for future broadcast & group invites."""
+    if not phone or phone == 'Unknown':
+        return
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        with sqlite3.connect(SQLITE_PATH) as conn:
+            conn.execute("""
+                INSERT INTO bot_users (phone, roll_no, name, stream, class_year, query_count, first_seen, last_seen, last_query)
+                VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)
+                ON CONFLICT(phone) DO UPDATE SET
+                    query_count = query_count + 1,
+                    last_seen = ?,
+                    last_query = ?,
+                    roll_no = COALESCE(?, roll_no),
+                    name = COALESCE(?, name),
+                    stream = COALESCE(?, stream),
+                    class_year = COALESCE(?, class_year)
+            """, (phone, roll_no, name, stream, class_year, now_str, now_str, raw_msg, now_str, raw_msg, roll_no, name, stream, class_year))
+            conn.commit()
+    except Exception as e:
+        print(f"Error logging interaction: {e}")
+
+
 def send_telegram_admin_alert(sender_phone, student_name, roll_no, stream_class, room, user_msg):
     """Sends immediate Telegram alert to Admin in a non-blocking background thread."""
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_ADMIN_CHAT_ID:
@@ -129,18 +179,18 @@ def send_telegram_admin_alert(sender_phone, student_name, roll_no, stream_class,
         except Exception as e:
             print(f"Telegram Alert Error: {e}")
 
-    # Launch in background thread so HTTP response returns instantly
     threading.Thread(target=_send, daemon=True).start()
 
 
 def process_bot_query(raw_text, sender_phone="Unknown"):
     text = raw_text.strip().upper()
     
-    # Smart Regex Matcher: catches IA/IS/IC + 25/26 + 1 to 3 digits
+    # Smart Regex Matcher
     match = re.search(r'\b(I[ASC])\s*[-]?\s*(2[56])\s*[-]?\s*(\d{1,3})\b', text, re.IGNORECASE)
     
     if not match:
-        # Welcome / Help guidance message
+        # Log unknown query
+        log_user_interaction(sender_phone, "GUEST", "Guest Visitor", "Unknown", "Unknown", raw_text)
         return """🙏 *Namaskar! Radhaballav Higher Secondary School Exam Bot me aapka swagat hai.*
 
 Apne *Aaj ke Exam ka Subject aur Hall No.* dekhne ke liye bus apna *Roll Number* type karke bhejein:
@@ -159,12 +209,15 @@ Apne *Aaj ke Exam ka Subject aur Hall No.* dekhne ke liye bus apna *Roll Number*
     lookup_key = f"{stream}{yr}-{num}"
     
     if lookup_key not in STUDENT_DB:
-        # Send alert to admin about unknown roll
+        log_user_interaction(sender_phone, lookup_key, "Unknown", stream, f"Year-{yr}", raw_text)
         send_telegram_admin_alert(sender_phone, "UNKNOWN STUDENT", lookup_key, "Unknown", "None", raw_text)
         return f"❌ *Record Not Found!* Roll No *{lookup_key}* hamare college record me nahi mila.\n\nKripya apna Roll No check karke dobara bhejein."
 
     st = STUDENT_DB[lookup_key]
     
+    # Save student interaction to database
+    log_user_interaction(sender_phone, st['roll_no'], st['name'], st['stream'], st['class_year'], raw_text)
+
     # Check if student took TC
     if st.get('is_tc'):
         send_telegram_admin_alert(sender_phone, "[TC ISSUED STUDENT]", lookup_key, st['class_year'], "N/A", raw_text)
@@ -176,11 +229,10 @@ Apne *Aaj ke Exam ka Subject aur Hall No.* dekhne ke liye bus apna *Roll Number*
 Aapka College Leaving Certificate (TC) issue ho chuka hai. 
 Kisi bhi query ke liye college administrative office se sampark karein."""
 
-    # Normal Active Student
+    # Active student day-wise exam
     today_str = datetime.now().strftime("%Y-%m-%d")
-    # For testing during exam period, default to 2026-10-29 if today is outside
     if today_str not in SCHEDULE:
-        today_str = '2026-10-29' # Default to Day 1 for demonstration
+        today_str = '2026-10-29' # Default during testing
         
     day_info = SCHEDULE[today_str]
     batch_key = '1st_year' if '1st' in st['class_year'] else '2nd_year'
@@ -217,20 +269,65 @@ Kisi bhi query ke liye college administrative office se sampark karein."""
 
 
 # -------------------------------------------------------------
-# HTTP ENDPOINTS
+# HTTP ENDPOINTS & ADMIN MANAGEMENT
 # -------------------------------------------------------------
 @app.route('/', methods=['GET'])
 def health():
+    with sqlite3.connect(SQLITE_PATH) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM bot_users")
+        users_count = cursor.fetchone()[0]
+        
     return jsonify({
         "status": "online",
         "service": "RBHS WhatsApp Student Exam Bot",
-        "total_records": len(STUDENT_DB),
+        "total_enrolled_records": len(STUDENT_DB),
+        "total_students_used_bot": users_count,
         "telegram_notifications": bool(TELEGRAM_BOT_TOKEN and TELEGRAM_ADMIN_CHAT_ID)
     })
 
+@app.route('/admin/users', methods=['GET'])
+def get_bot_users():
+    """Returns JSON list of all students who used the bot."""
+    stream_filter = request.args.get('stream')
+    query = "SELECT phone, roll_no, name, stream, class_year, query_count, first_seen, last_seen FROM bot_users"
+    params = []
+    if stream_filter:
+        query += " WHERE stream = ?"
+        params.append(stream_filter)
+    query += " ORDER BY last_seen DESC"
+    
+    with sqlite3.connect(SQLITE_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(query, params).fetchall()
+        users = [dict(r) for r in rows]
+        
+    return jsonify({
+        "total_users": len(users),
+        "users": users
+    })
+
+@app.route('/admin/export-users', methods=['GET'])
+def export_users_csv():
+    """Download CSV file of all students who used the bot with mobile numbers."""
+    with sqlite3.connect(SQLITE_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute("SELECT phone, roll_no, name, stream, class_year, query_count, last_seen FROM bot_users ORDER BY roll_no").fetchall()
+        
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["WhatsApp Mobile Number", "Roll No", "Student Name", "Stream", "Class / Batch", "Total Queries", "Last Active"])
+    for r in rows:
+        writer.writerow([r["phone"], r["roll_no"], r["name"], r["stream"], r["class_year"], r["query_count"], r["last_seen"]])
+        
+    return Response(
+        output.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": "attachment;filename=rbhs_students_whatsapp_list.csv"}
+    )
+
 @app.route('/webhook', methods=['POST', 'GET'])
 def webhook():
-    # Handle Meta Webhook Verification Challenge
     if request.method == 'GET':
         mode = request.args.get('hub.mode')
         token = request.args.get('hub.verify_token')
@@ -239,17 +336,14 @@ def webhook():
             return challenge, 200
         return 'Forbidden', 403
 
-    # Handle Incoming POST Message
     data = request.json or {}
     raw_text = ''
     sender_phone = 'Unknown'
 
-    # 1. Evolution API format
     if 'data' in data and 'message' in data['data']:
         msg_obj = data['data']['message']
         raw_text = msg_obj.get('conversation') or msg_obj.get('extendedTextMessage', {}).get('text') or ''
         sender_phone = data['data'].get('key', {}).get('remoteJid', 'Unknown').split('@')[0]
-    # 2. Meta Cloud API format
     elif 'entry' in data:
         try:
             val = data['entry'][0]['changes'][0]['value']
@@ -258,7 +352,6 @@ def webhook():
             sender_phone = msg.get('from', 'Unknown')
         except:
             pass
-    # 3. Simple JSON / Generic test format: { "message": "ia26015", "phone": "9437XXXXXX" }
     else:
         raw_text = data.get('message', request.args.get('message', ''))
         sender_phone = data.get('phone', request.args.get('phone', 'Unknown'))

@@ -59,26 +59,26 @@ SCHEDULE = {
     '2026-10-29': {
         'label': 'Day 1 (29-10-2026 - Thursday)',
         '1st_year': {
-            'Science': ('English', '1st Sitting (12:30 PM to 01:15 PM)'),
-            'Commerce': ('English', '1st Sitting (12:30 PM to 01:15 PM)'),
+            'Science': ('MIL (Odia / Alt English)', '1st Sitting (12:30 PM to 01:15 PM)'),
+            'Commerce': ('MIL (Odia)', '1st Sitting (12:30 PM to 01:15 PM)'),
             'Arts': ('MIL (Odia)', '2nd Sitting (01:30 PM to 02:15 PM)')
         },
         '2nd_year': {
-            'Science': ('English', '1st Sitting (10:30 AM to 11:15 AM)'),
-            'Commerce': ('English', '1st Sitting (10:30 AM to 11:15 AM)'),
+            'Science': ('MIL (Odia / Hindi / Alt Eng)', '1st Sitting (10:30 AM to 11:15 AM)'),
+            'Commerce': ('MIL (Odia)', '1st Sitting (10:30 AM to 11:15 AM)'),
             'Arts': ('MIL (Odia)', '2nd Sitting (11:30 AM to 12:15 PM)')
         }
     },
     '2026-10-30': {
         'label': 'Day 2 (30-10-2026 - Friday)',
         '1st_year': {
-            'Science': ('MIL (Odia / Alt English)', '1st Sitting (12:30 PM to 01:15 PM)'),
-            'Commerce': ('MIL (Odia)', '1st Sitting (12:30 PM to 01:15 PM)'),
+            'Science': ('English', '1st Sitting (12:30 PM to 01:15 PM)'),
+            'Commerce': ('English', '1st Sitting (12:30 PM to 01:15 PM)'),
             'Arts': ('English', '2nd Sitting (01:30 PM to 02:15 PM)')
         },
         '2nd_year': {
-            'Science': ('MIL (Odia / Hindi / Alt Eng)', '1st Sitting (10:30 AM to 11:15 AM)'),
-            'Commerce': ('MIL (Odia)', '1st Sitting (10:30 AM to 11:15 AM)'),
+            'Science': ('English', '1st Sitting (10:30 AM to 11:15 AM)'),
+            'Commerce': ('English', '1st Sitting (10:30 AM to 11:15 AM)'),
             'Arts': ('English', '2nd Sitting (11:30 AM to 12:15 PM)')
         }
     },

@@ -286,26 +286,195 @@ def send_telegram_admin_alert(sender_phone, student_name, roll_no, stream_class,
     threading.Thread(target=_send, daemon=True).start()
 
 
+# Common greetings and non-name commands
+GREETINGS_OR_COMMANDS = {
+    'HI', 'HII', 'HIII', 'HELLO', 'HELO', 'HEY', 'HEYY', 'HELP',
+    'MENU', 'START', 'INFO', 'NAMASTE', 'NAMASKAR', 'PRANAM',
+    'EXAM', 'ROUTINE', 'SCHEDULE', 'TIMETABLE', 'TIME TABLE', 'TIME',
+    'BOT', 'OK', 'OKAY', 'THANKS', 'THANK YOU', 'DHANYAWAD', 'TEST',
+    'YES', 'NO', 'BYE', 'GOOD MORNING', 'GOOD AFTERNOON', 'GOOD EVENING'
+}
+
+def find_students_by_name(query_str):
+    """
+    Searches for students by name across local cache and Neon Cloud PostgreSQL.
+    Supports uppercase, lowercase, mixed case, partial names, first/last names.
+    Returns a deduplicated list of matching student dictionaries.
+    """
+    if not query_str:
+        return []
+        
+    # Clean query: strip conversational filler words (Hindi/English)
+    cleaned = re.sub(r'(?i)\b(mera naam|my name is|student name|student|naam|name|search|roll no of|roll number of|roll no|roll number|kya hai|batao|bataiye|dekhna hai|hai|ka|ki)\b', ' ', query_str)
+    cleaned = re.sub(r'[^a-zA-Z\s]', ' ', cleaned).strip()
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+    
+    if len(cleaned) < 2:
+        return []
+        
+    query_upper = cleaned.upper()
+    query_words = [w for w in query_upper.split() if len(w) >= 2]
+    
+    unique_students = {}
+    if STUDENT_DB:
+        for k, st in STUDENT_DB.items():
+            r = st.get('roll_no')
+            if r and r not in unique_students:
+                unique_students[r] = st
+
+    matches = []
+    for r, st in unique_students.items():
+        name = (st.get('name') or '').upper().strip()
+        if not name:
+            continue
+            
+        # Priority 1: Exact full name match
+        if name == query_upper:
+            matches.append((st, 1))
+            continue
+            
+        # Priority 2: All query words present with word boundaries
+        if query_words:
+            all_words_found = True
+            for w in query_words:
+                if not re.search(r'\b' + re.escape(w) + r'\b', name):
+                    all_words_found = False
+                    break
+            if all_words_found:
+                matches.append((st, 2))
+                continue
+
+    # Priority 3: Fallback substring match if no whole-word match
+    if not matches and len(query_upper) >= 3:
+        for r, st in unique_students.items():
+            name = (st.get('name') or '').upper().strip()
+            if query_upper in name:
+                matches.append((st, 3))
+
+    # Priority 4: Query Neon PostgreSQL directly if local search found 0 results
+    if not matches:
+        try:
+            sql_escaped = query_upper.replace("'", "''")
+            sql = f"SELECT roll_no, name, stream, class_year, batch, is_tc, status, hall_no, exam_timing, subjects FROM students WHERE UPPER(name) LIKE '%{sql_escaped}%' LIMIT 10;"
+            rows = neon_query(sql, return_rows=True)
+            if rows:
+                for r in rows:
+                    subjs = [s.strip() for s in (r.get('subjects') or '').split(',') if s.strip()]
+                    st_obj = {
+                        'roll_no': r['roll_no'],
+                        'name': r['name'],
+                        'stream': r['stream'],
+                        'class_year': r['class_year'],
+                        'batch': r.get('batch', ''),
+                        'is_tc': bool(r.get('is_tc')),
+                        'status': r.get('status', 'ACTIVE'),
+                        'subjects': subjs,
+                        'subjects_formatted': "\n".join([f"  • {s}" for s in subjs]),
+                        'hall_no': r.get('hall_no', 'Not Assigned'),
+                        'exam_timing': r.get('exam_timing', 'Check Notice')
+                    }
+                    matches.append((st_obj, 3))
+        except Exception as e:
+            print(f"Neon live name search error: {e}")
+
+    matches.sort(key=lambda x: x[1])
+    seen_rolls = set()
+    deduped = []
+    for m in matches:
+        st = m[0]
+        roll = st.get('roll_no')
+        if roll not in seen_rolls:
+            seen_rolls.add(roll)
+            deduped.append(st)
+    return deduped
+
+
 def process_bot_query(raw_text, sender_phone="Unknown"):
     text = raw_text.strip().upper()
     
-    # Smart Regex Matcher: catches IA/IS/IC (or A/S/C) + 25/26 + 1 to 4 digits
+    # 1. Smart Regex Matcher: catches IA/IS/IC (or A/S/C) + 25/26 + 1 to 4 digits
     match = re.search(r'\b(I?[ASC])\s*[-]?\s*(2[56])\s*[-]?\s*(\d{1,4})\b', text, re.IGNORECASE)
     
     if not match:
-        # Log unknown / greeting query
-        log_user_interaction(sender_phone, "GUEST", "New Student Visitor", "Unknown", "Unknown", raw_text)
-        return """🙏 *Radhaballav H.S. School Exam Bot*
-Exam Subject, Time aur Hall No. janne ke liye apna Roll Number bhejein:
+        clean_text = re.sub(r'[^a-zA-Z\s]', ' ', raw_text).strip()
+        is_greeting = clean_text.upper() in GREETINGS_OR_COMMANDS or len(clean_text) < 2
+        
+        # If user sent a greeting or menu request
+        if is_greeting:
+            log_user_interaction(sender_phone, "GUEST", "New Student Visitor", "Unknown", "Unknown", raw_text)
+            return """🙏 *Radhaballav H.S. School Exam Bot*
+Apna Exam Routine, Timing aur Hall No. janne ke liye:
 
-👉 *Examples (1st & 2nd Year):*
-🧪 *Science:* `IS26-001` / `IS25-001`
-💼 *Commerce:* `IC26-005` / `IC25-005`
-🎨 *Arts:* `IA26-015` / `IA25-015`
-*(Chota letter ya bina dash ke bhi chalega: is26001)*
+1️⃣ *Roll Number bhejein:*
+   🧪 *Science:* `IS26-001` / `IS25-001`
+   💼 *Commerce:* `IC26-005` / `IC25-005`
+   🎨 *Arts:* `IA26-015` / `IA25-015`
 
-👇 *Apna Roll Number type karke bhejein:*"""
+2️⃣ *Ya Apna Naam (Name) bhejein:*
+   👤 Jaise: `Rahul Das` ya `Smaranika Jena`
 
+*(Capital ya Small letters dono chalenge: is26001 / rahul)*"""
+
+        # Otherwise, attempt to find student by Name (case-insensitive)
+        name_matches = find_students_by_name(raw_text)
+        
+        if not name_matches:
+            log_user_interaction(sender_phone, "GUEST", f"Not Found: {raw_text[:25]}", "Unknown", "Unknown", raw_text)
+            return f"""❌ *Koi Record Nahi Mila!*
+Hamare college database me *"{raw_text.strip()}"* naam ka koi student nahi mila.
+
+💡 *Kripya check karein:*
+1. Apne naam ki spelling sahi likhein (Jaise: *Rahul Kumar* ya *Smaranika Jena*).
+2. Ya direct apna *Roll Number* bhejein (Jaise: `IS26-001`, `IC26-005`, `IA26-015`).
+*(Capital ya small sab chalega)*"""
+
+        # If exactly 1 student found
+        if len(name_matches) == 1:
+            st = name_matches[0]
+            log_user_interaction(sender_phone, st['roll_no'], st['name'], st['stream'], st['class_year'], raw_text)
+            send_telegram_admin_alert(
+                sender_phone=sender_phone,
+                student_name=st['name'],
+                roll_no=st['roll_no'],
+                stream_class=f"{st['class_year']} ({st['stream']})",
+                room=st.get('hall_no', 'N/A'),
+                user_msg=f"[Name Search] {raw_text}"
+            )
+            return f"""🔍 *Student Mil Gaya!*
+━━━━━━━━━━━━━━━━━━━━
+👤 *Name:* *{st['name']}*
+🆔 *Roll Number:* `{st['roll_no']}`
+🏛 *Stream & Class:* {st['stream']} ({st['class_year']})
+📍 *Exam Hall:* *{st.get('hall_no', 'Check Notice Board')}*
+⏰ *Exam Timing:* {st.get('exam_timing', 'Check Notice')}
+━━━━━━━━━━━━━━━━━━━━
+👉 *Aaj ka exam subject aur full details dekhne ke liye:*
+Niche apna Roll Number `{st['roll_no']}` type karke bhejein! 👍"""
+
+        # If multiple students found with the same name
+        log_user_interaction(sender_phone, "MULTI_MATCH", f"Matches: {len(name_matches)}", "Unknown", "Unknown", raw_text)
+        num_emojis = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣']
+        list_text = []
+        for idx, st in enumerate(name_matches[:6]):
+            emoji = num_emojis[idx] if idx < len(num_emojis) else f"{idx+1}."
+            list_text.append(
+                f"{emoji} *{st['name']}*\n"
+                f"   🆔 Roll No: `{st['roll_no']}`\n"
+                f"   🏛 {st['stream']} ({st['class_year']}) | Hall: *{st.get('hall_no', 'N/A')}*"
+            )
+
+        results_formatted = "\n\n".join(list_text)
+        extra_note = ""
+        if len(name_matches) > 6:
+            extra_note = f"\n\n⚠️ *Kul {len(name_matches)} results mile!* Agar aapka naam upar nahi hai, toh apna pura naam (Surname ke saath) likhein."
+
+        return f"""🔍 *"{raw_text.strip()}" Naam ke {len(name_matches)} Students Mile:*
+━━━━━━━━━━━━━━━━━━━━
+{results_formatted}
+━━━━━━━━━━━━━━━━━━━━{extra_note}
+👉 *Apna full routine aur aaj ka paper dekhne ke liye apna Roll Number type karke bhejein!*"""
+
+    # 2. Roll Number matched
     stream = match.group(1).upper()
     if not stream.startswith('I'):
         stream = 'I' + stream

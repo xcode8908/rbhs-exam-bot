@@ -1,7 +1,10 @@
 import os
 import json
 import re
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
+
+# Indian Standard Time (IST) Timezone for accurate Indian exam scheduling
+IST = timezone(timedelta(hours=5, minutes=30))
 import threading
 import sqlite3
 import csv
@@ -260,7 +263,7 @@ def send_telegram_admin_alert(sender_phone, student_name, roll_no, stream_class,
         return
 
     def _send():
-        now_str = datetime.now().strftime("%d-%b-%Y %I:%M:%S %p")
+        now_str = datetime.now(IST).strftime("%d-%b-%Y %I:%M:%S %p")
         text = f"""🔔 *NEW EXAM BOT QUERY ALERT*
 ━━━━━━━━━━━━━━━━━━━━━━━━━
 📱 *Student Phone:* `{sender_phone}`
@@ -543,8 +546,8 @@ Kripya Roll No check karke dobara bhejein."""
 Aapka TC issue ho chuka hai. 
 Administrative office se sampark karein."""
 
-    # Active student day-wise exam
-    today_str = datetime.now().strftime("%Y-%m-%d")
+    # Active student day-wise exam (in Indian Standard Time)
+    today_str = datetime.now(IST).strftime("%Y-%m-%d")
     if today_str not in SCHEDULE:
         today_str = '2026-10-29' # Default during testing
         

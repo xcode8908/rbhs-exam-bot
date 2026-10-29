@@ -454,7 +454,7 @@ Check Today's Paper, Hall & Timing:
             return f"""🔍 *STUDENT FOUND*
 ───────────────
 👤 *{st['name']}*
-🆔 Roll No: `{st['roll_no']}`
+> 🆔 *Roll No:* `{st['roll_no']}` 🔴
 🎓 {cls_stream}
 📍 Hall: *{hall}*
 ───────────────
@@ -470,8 +470,8 @@ Check Today's Paper, Hall & Timing:
             cls_str = f"{short_cls} {st.get('stream', '')}".strip()
             hall_str = st.get('hall_no', 'N/A')
             list_text.append(
-                f"{emoji} *{st['name']}* • `{st['roll_no']}`\n"
-                f"   ↳ {cls_str} | Hall: *{hall_str}*"
+                f"{emoji} *{st['name']}*\n"
+                f"   ↳ 🆔 `{st['roll_no']}` 🔴 | *{hall_str}* ({cls_str})"
             )
 
         results_formatted = "\n\n".join(list_text)
@@ -569,12 +569,13 @@ Administrative office se sampark karein."""
 
     reply = f"""🏛️ *RBHS EXAM DESK*
 ───────────────
-👤 *{st['name']}* | `{st['roll_no']}`
+👤 *{st['name']}*
+🆔 Roll No: `{st['roll_no']}`
 🎓 {cls_stream}
 ───────────────
-📖 *Today:* *{subject_today}*
-📍 *Hall:* *{hall_no}*
-⏰ *Time:* {sitting_time}
+> 📖 *Today:* *{subject_today}* 🔴
+> 📍 *Hall:* *{hall_no}* 🔴
+> ⏰ *Time:* {sitting_time}
 ───────────────
 ⚠️ *15 min pehle pahuchein. All the best!* 👍"""
 

@@ -389,6 +389,17 @@ def find_students_by_name(query_str):
     return deduped
 
 
+def format_short_class(class_year_str):
+    """Formats verbose class names into compact, elegant labels."""
+    if not class_year_str:
+        return ""
+    if '1st' in class_year_str:
+        return "+2 1st Yr"
+    elif '2nd' in class_year_str:
+        return "+2 2nd Yr"
+    return class_year_str.split('(')[0].strip()
+
+
 def process_bot_query(raw_text, sender_phone="Unknown"):
     text = raw_text.strip().upper()
     
@@ -402,31 +413,27 @@ def process_bot_query(raw_text, sender_phone="Unknown"):
         # If user sent a greeting or menu request
         if is_greeting:
             log_user_interaction(sender_phone, "GUEST", "New Student Visitor", "Unknown", "Unknown", raw_text)
-            return """🙏 *Radhaballav H.S. School Exam Bot*
-Apna Exam Routine, Timing aur Hall No. janne ke liye:
+            return """🏛️ *RBHS EXAM DESK*
+───────────────
+Check Today's Paper, Hall & Timing:
 
-1️⃣ *Roll Number bhejein:*
-   🧪 *Science:* `IS26-001` / `IS25-001`
-   💼 *Commerce:* `IC26-005` / `IC25-005`
-   🎨 *Arts:* `IA26-015` / `IA25-015`
-
-2️⃣ *Ya Apna Naam (Name) bhejein:*
-   👤 Jaise: `Rahul Das` ya `Smaranika Jena`
-
-*(Capital ya Small letters dono chalenge: is26001 / rahul)*"""
+• *Roll No:* `IS26-001` ya `is26001`
+• *Naam:* `Rahul Das` ya `Smaranika`
+───────────────
+👇 *Apna Roll No ya Naam likh kar bhejein:*"""
 
         # Otherwise, attempt to find student by Name (case-insensitive)
         name_matches = find_students_by_name(raw_text)
         
         if not name_matches:
             log_user_interaction(sender_phone, "GUEST", f"Not Found: {raw_text[:25]}", "Unknown", "Unknown", raw_text)
-            return f"""❌ *Koi Record Nahi Mila!*
-Hamare college database me *"{raw_text.strip()}"* naam ka koi student nahi mila.
+            return f"""❌ *Record Not Found*
+───────────────
+*"{raw_text.strip()}"* college record me nahi mila.
 
-💡 *Kripya check karein:*
-1. Apne naam ki spelling sahi likhein (Jaise: *Rahul Kumar* ya *Smaranika Jena*).
-2. Ya direct apna *Roll Number* bhejein (Jaise: `IS26-001`, `IC26-005`, `IA26-015`).
-*(Capital ya small sab chalega)*"""
+💡 *Tips:*
+• Naam ki spelling check karein (*Rahul Sahoo*)
+• Ya Roll No bhejein (`IS26-001` / `is26001`)"""
 
         # If exactly 1 student found
         if len(name_matches) == 1:
@@ -440,39 +447,43 @@ Hamare college database me *"{raw_text.strip()}"* naam ka koi student nahi mila.
                 room=st.get('hall_no', 'N/A'),
                 user_msg=f"[Name Search] {raw_text}"
             )
-            return f"""🔍 *Student Mil Gaya!*
-━━━━━━━━━━━━━━━━━━━━
-👤 *Name:* *{st['name']}*
-🆔 *Roll Number:* `{st['roll_no']}`
-🏛 *Stream & Class:* {st['stream']} ({st['class_year']})
-📍 *Exam Hall:* *{st.get('hall_no', 'Check Notice Board')}*
-⏰ *Exam Timing:* {st.get('exam_timing', 'Check Notice')}
-━━━━━━━━━━━━━━━━━━━━
-👉 *Aaj ka exam subject aur full details dekhne ke liye:*
-Niche apna Roll Number `{st['roll_no']}` type karke bhejein! 👍"""
+            short_cls = format_short_class(st.get('class_year', ''))
+            cls_stream = f"{short_cls} • {st['stream']}" if short_cls else st.get('stream', '')
+            hall = st.get('hall_no', 'Notice Board')
+
+            return f"""🔍 *STUDENT FOUND*
+───────────────
+👤 *{st['name']}*
+🆔 Roll No: `{st['roll_no']}`
+🎓 {cls_stream}
+📍 Hall: *{hall}*
+───────────────
+👉 Aaj ke paper ke liye bhejein: `{st['roll_no']}`"""
 
         # If multiple students found with the same name
         log_user_interaction(sender_phone, "MULTI_MATCH", f"Matches: {len(name_matches)}", "Unknown", "Unknown", raw_text)
-        num_emojis = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣']
+        num_emojis = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣']
         list_text = []
-        for idx, st in enumerate(name_matches[:6]):
+        for idx, st in enumerate(name_matches[:5]):
             emoji = num_emojis[idx] if idx < len(num_emojis) else f"{idx+1}."
+            short_cls = format_short_class(st.get('class_year', ''))
+            cls_str = f"{short_cls} {st.get('stream', '')}".strip()
+            hall_str = st.get('hall_no', 'N/A')
             list_text.append(
-                f"{emoji} *{st['name']}*\n"
-                f"   🆔 Roll No: `{st['roll_no']}`\n"
-                f"   🏛 {st['stream']} ({st['class_year']}) | Hall: *{st.get('hall_no', 'N/A')}*"
+                f"{emoji} *{st['name']}* • `{st['roll_no']}`\n"
+                f"   ↳ {cls_str} | Hall: *{hall_str}*"
             )
 
         results_formatted = "\n\n".join(list_text)
         extra_note = ""
-        if len(name_matches) > 6:
-            extra_note = f"\n\n⚠️ *Kul {len(name_matches)} results mile!* Agar aapka naam upar nahi hai, toh apna pura naam (Surname ke saath) likhein."
+        if len(name_matches) > 5:
+            extra_note = f"\n   ↳ *+{len(name_matches)-5} more students...* Pura naam likhein."
 
-        return f"""🔍 *"{raw_text.strip()}" Naam ke {len(name_matches)} Students Mile:*
-━━━━━━━━━━━━━━━━━━━━
-{results_formatted}
-━━━━━━━━━━━━━━━━━━━━{extra_note}
-👉 *Apna full routine aur aaj ka paper dekhne ke liye apna Roll Number type karke bhejein!*"""
+        return f"""🔍 *{len(name_matches)} Students found for "{raw_text.strip()}":*
+───────────────
+{results_formatted}{extra_note}
+───────────────
+👉 Routine dekhne ke liye apna *Roll No* bhejein."""
 
     # 2. Roll Number matched
     stream = match.group(1).upper()
@@ -510,7 +521,10 @@ Niche apna Roll Number `{st['roll_no']}` type karke bhejein! 👍"""
     if lookup_key not in STUDENT_DB:
         log_user_interaction(sender_phone, lookup_key, "Unknown", stream, f"Year-{yr}", raw_text)
         send_telegram_admin_alert(sender_phone, "UNKNOWN STUDENT", lookup_key, "Unknown", "None", raw_text)
-        return f"❌ *Record Not Found!* Roll No *{lookup_key}* hamare college record me nahi mila.\n\nKripya apna Roll No check karke dobara bhejein."
+        return f"""❌ *Record Not Found*
+───────────────
+Roll No *{lookup_key}* college record me nahi mila.
+Kripya Roll No check karke dobara bhejein."""
 
     st = STUDENT_DB[lookup_key]
     
@@ -520,13 +534,14 @@ Niche apna Roll Number `{st['roll_no']}` type karke bhejein! 👍"""
     # Check if student took TC
     if st.get('is_tc'):
         send_telegram_admin_alert(sender_phone, "[TC ISSUED STUDENT]", lookup_key, st['class_year'], "N/A", raw_text)
-        return f"""⚠️ *NOTICE: COLLEGE LEAVED / TC ISSUED*
--------------------------------------------------
-🆔 *Roll No:* {st['roll_no']}
-🏛 *Class:* {st['class_year']} ({st['stream']})
-
-Aapka College Leaving Certificate (TC) issue ho chuka hai. 
-Kisi bhi query ke liye college administrative office se sampark karein."""
+        short_cls = format_short_class(st['class_year'])
+        return f"""⚠️ *COLLEGE LEAVING / TC ISSUED*
+───────────────
+🆔 *Roll No:* `{st['roll_no']}`
+🎓 {short_cls} ({st['stream']})
+───────────────
+Aapka TC issue ho chuka hai. 
+Administrative office se sampark karein."""
 
     # Active student day-wise exam
     today_str = datetime.now().strftime("%Y-%m-%d")
@@ -549,18 +564,19 @@ Kisi bhi query ke liye college administrative office se sampark karein."""
         user_msg=raw_text
     )
 
-    subjs_line = ", ".join(st['subjects']) if st.get('subjects') else 'None'
-    reply = f"""🎓 *Radhaballav H.S. School*
-👤 *{st['name']}* (`{st['roll_no']}`)
-🏛 {st['class_year']} ({st['stream']})
-━━━━━━━━━━━━━━━━━━━━
-📌 *AAJ KA EXAM:*
-📖 *Subject:* {subject_today}
-📍 *Allotted Room:* *{hall_no}*
-⏰ *Sitting Time:* {sitting_time}
-━━━━━━━━━━━━━━━━━━━━
-📚 *Subjects:* {subjs_line}
-⚠️ 15 min pehle hall me pahuchein! 👍"""
+    short_cls = format_short_class(st.get('class_year', ''))
+    cls_stream = f"{short_cls} • {st['stream']}" if short_cls else st.get('stream', '')
+
+    reply = f"""🏛️ *RBHS EXAM DESK*
+───────────────
+👤 *{st['name']}* | `{st['roll_no']}`
+🎓 {cls_stream}
+───────────────
+📖 *Today:* *{subject_today}*
+📍 *Hall:* *{hall_no}*
+⏰ *Time:* {sitting_time}
+───────────────
+⚠️ *15 min pehle pahuchein. All the best!* 👍"""
 
     return reply
 

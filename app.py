@@ -308,7 +308,7 @@ def find_students_by_name(query_str):
         return []
         
     # Clean query: strip conversational filler words (Hindi/English)
-    cleaned = re.sub(r'(?i)\b(mera naam|my name is|student name|student|naam|name|search|roll no of|roll number of|roll no|roll number|kya hai|batao|bataiye|dekhna hai|hai|ka|ki)\b', ' ', query_str)
+    cleaned = re.sub(r'(?i)\b(all subjects|subjects?|sub|mera naam|my name is|student name|student|naam|name|search|roll no of|roll number of|roll no|roll number|kya hai|batao|bataiye|dekhna hai|hai|ka|ki)\b', ' ', query_str)
     cleaned = re.sub(r'[^a-zA-Z\s]', ' ', cleaned).strip()
     cleaned = re.sub(r'\s+', ' ', cleaned).strip()
     
@@ -406,12 +406,43 @@ def format_short_class(class_year_str):
 def process_bot_query(raw_text, sender_phone="Unknown"):
     text = raw_text.strip().upper()
     
-    # 1. Smart Regex Matcher: catches IA/IS/IC (or A/S/C) + 25/26 + 1 to 4 digits
-    match = re.search(r'\b(I?[ASC])\s*[-]?\s*(2[56])\s*[-]?\s*(\d{1,4})\b', text, re.IGNORECASE)
+    # Check if query explicitly asks for subjects only (e.g. "subjects is26001", "sub is26001")
+    is_subject_only_query = bool(re.search(r'\b(SUB|SUBJECTS?|ALL\s*SUBJECTS?)\b', text, re.IGNORECASE))
+    
+    # Clean text to strip prefixes if glued (e.g. subis26001 -> is26001, sub: is26-001 -> is26-001)
+    cleaned_input = re.sub(r'(?i)^(sub(?:jects?)?|all\s*subjects?|roll\s*no?)\s*[:=\-]?\s*', '', raw_text.strip())
+    
+    # 1. Smart Regex Matcher: catches IA/IS/IC (or A/S/C) + 25/26 + 1 to 4 digits (across both original and cleaned input)
+    match = re.search(r'\b(I?[ASC])\s*[-]?\s*(2[56])\s*[-]?\s*(\d{1,4})\b', text, re.IGNORECASE) or \
+            re.search(r'\b(I?[ASC])\s*[-]?\s*(2[56])\s*[-]?\s*(\d{1,4})\b', cleaned_input, re.IGNORECASE)
     
     if not match:
-        clean_text = re.sub(r'[^a-zA-Z\s]', ' ', raw_text).strip()
-        is_greeting = clean_text.upper() in GREETINGS_OR_COMMANDS or len(clean_text) < 2
+        clean_text = re.sub(r'[^a-zA-Z\s]', ' ', raw_text).strip().upper()
+        
+        # General Today's Subject or Routine command (no roll number needed)
+        if clean_text in {'TODAY', 'SUBJECT', 'SUBJECTS', 'ROUTINE', 'SCHEDULE', 'TIMETABLE', 'TIME TABLE', 'EXAM', 'AAJ', 'AAJ KA EXAM', 'AAJ KA PAPER', 'AAJ KYA HAI'}:
+            today_str = datetime.now(IST).strftime("%Y-%m-%d")
+            if today_str not in SCHEDULE:
+                today_str = '2026-10-30'
+            day_data = SCHEDULE.get(today_str, SCHEDULE['2026-10-30'])
+            day_label = day_data['label']
+            y2 = day_data['2nd_year']
+            y1 = day_data['1st_year']
+            return f"""📅 *EXAM SCHEDULE: {day_label}*
+───────────────
+🔹 *+2 2nd Year (Class-XII):*
+• 🧪 Science: *{y2['Science'][0]}* (10:30 AM - 11:15 AM)
+• 💼 Commerce: *{y2['Commerce'][0]}* (10:30 AM - 11:15 AM)
+• 🎨 Arts: *{y2['Arts'][0]}* (11:30 AM - 12:15 PM)
+
+🔹 *+2 1st Year (Class-XI):*
+• 🧪 Science: *{y1['Science'][0]}* (12:30 PM - 01:15 PM)
+• 💼 Commerce: *{y1['Commerce'][0]}* (12:30 PM - 01:15 PM)
+• 🎨 Arts: *{y1['Arts'][0]}* (01:30 PM - 02:15 PM)
+───────────────
+👉 Apna *Exam Hall No* janne ke liye apna *Roll No* ya *Naam* bhejein!"""
+
+        is_greeting = clean_text in GREETINGS_OR_COMMANDS or len(clean_text) < 2
         
         # If user sent a greeting or menu request
         if is_greeting:
@@ -422,6 +453,7 @@ Check Today's Paper, Hall & Timing:
 
 • *Roll No:* `IS26-001` ya `is26001`
 • *Naam:* `Rahul Das` ya `Smaranika`
+• *Routine:* `TODAY` ya `ROUTINE`
 ───────────────
 👇 *Apna Roll No ya Naam likh kar bhejein:*"""
 
@@ -569,6 +601,21 @@ Administrative office se sampark karein."""
 
     short_cls = format_short_class(st.get('class_year', ''))
     cls_stream = f"{short_cls} • {st['stream']}" if short_cls else st.get('stream', '')
+    subjs_list = st.get('subjects') or []
+    subjs_line = ", ".join(subjs_list) if subjs_list else 'Check College Notice'
+
+    # If student explicitly asked for subjects (e.g. "subjects is26001" or "sub is26001")
+    if is_subject_only_query:
+        subjs_bullets = "\n".join([f"• {s}" for s in subjs_list]) if subjs_list else 'Check College Notice'
+        return f"""📚 *REGISTERED SUBJECTS*
+───────────────
+👤 *{st['name']}*
+> 🆔 *Roll No:* `{st['roll_no']}` 🔴
+🎓 {cls_stream}
+───────────────
+{subjs_bullets}
+───────────────
+👉 Aaj ka exam dekhne ke liye: `{st['roll_no']}` type karein!"""
 
     reply = f"""🏛️ *RBHS EXAM DESK*
 ───────────────
@@ -579,6 +626,9 @@ Administrative office se sampark karein."""
 > 📖 *Today:* *{subject_today}* 🔴
 > 📍 *Hall:* *{hall_no}* 🔴
 > ⏰ *Time:* {sitting_time}
+───────────────
+📚 *All Subjects:*
+{subjs_line}
 ───────────────
 ⚠️ *15 min pehle pahuchein. All the best!* 👍"""
 

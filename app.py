@@ -113,6 +113,17 @@ init_db()
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "8965596009:AAHRANWd1oJpVapa7tHmVJqi3oXbdt-nCsI")
 TELEGRAM_ADMIN_CHAT_ID = os.environ.get("TELEGRAM_ADMIN_CHAT_ID", "6161463701")
 
+# Load verified Day 4, 5, 6 student room allocations from Day Wise Exam System
+DAY_SCHEDULE_PATH = os.path.join(os.path.dirname(__file__), 'DAY4_5_6_STUDENT_EXAM_SCHEDULE.json')
+DAY4_5_6_SCHEDULE = {}
+if os.path.exists(DAY_SCHEDULE_PATH):
+    try:
+        with open(DAY_SCHEDULE_PATH, 'r', encoding='utf-8') as f:
+            DAY4_5_6_SCHEDULE = json.load(f)
+        print(f"✅ Loaded Day 4, 5, 6 verified student room allocations ({len(DAY4_5_6_SCHEDULE)} keys)!")
+    except Exception as e:
+        print(f"Error loading DAY4_5_6_SCHEDULE: {e}")
+
 # Exam schedule definition
 SCHEDULE = {
     '2026-10-29': {
@@ -144,51 +155,51 @@ SCHEDULE = {
     '2026-10-31': {
         'label': 'Day 3 (31-10-2026 - Saturday)',
         '1st_year': {
-            'Science': ('Physics', '1st Sitting (12:30 PM to 01:15 PM)'),
-            'Commerce': ('Accountancy (ACT)', '1st Sitting (12:30 PM to 01:15 PM)'),
+            'Science': ('Mathematics', '1st Sitting (12:30 PM to 01:15 PM)'),
+            'Commerce': ('Business Studies & Management (BSM)', '1st Sitting (12:30 PM to 01:15 PM)'),
             'Arts': ('Political Science', '2nd Sitting (01:30 PM to 02:15 PM)')
         },
         '2nd_year': {
-            'Science': ('Physics', '1st Sitting (10:30 AM to 11:15 AM)'),
-            'Commerce': ('Accountancy (ACT)', '1st Sitting (10:30 AM to 11:15 AM)'),
+            'Science': ('Mathematics', '1st Sitting (10:30 AM to 11:15 AM)'),
+            'Commerce': ('Business Studies & Management (BSM)', '1st Sitting (10:30 AM to 11:15 AM)'),
             'Arts': ('Political Science', '2nd Sitting (11:30 AM to 12:15 PM)')
         }
     },
     '2026-11-02': {
         'label': 'Day 4 (02-11-2026 - Monday)',
         '1st_year': {
-            'Science': ('Chemistry', '1st Sitting (12:30 PM to 01:15 PM)'),
-            'Commerce': ('Business Studies & Management (BSM)', '1st Sitting (12:30 PM to 01:15 PM)'),
+            'Science': ('Physics', '1st Sitting (12:30 PM to 01:15 PM)'),
+            'Commerce': ('Business Mathematics & Statistics (BMS)', '1st Sitting (12:30 PM to 01:15 PM)'),
             'Arts': ('History', '2nd Sitting (01:30 PM to 02:15 PM)')
         },
         '2nd_year': {
-            'Science': ('Chemistry', '1st Sitting (10:30 AM to 11:15 AM)'),
-            'Commerce': ('Business Studies & Management (BSM)', '1st Sitting (10:30 AM to 11:15 AM)'),
+            'Science': ('Physics', '1st Sitting (10:30 AM to 11:15 AM)'),
+            'Commerce': ('Business Mathematics & Statistics (BMS)', '1st Sitting (10:30 AM to 11:15 AM)'),
             'Arts': ('History', '2nd Sitting (11:30 AM to 12:15 PM)')
         }
     },
     '2026-11-03': {
         'label': 'Day 5 (03-11-2026 - Tuesday)',
         '1st_year': {
-            'Science': ('Mathematics', '1st Sitting (12:30 PM to 01:15 PM)'),
-            'Commerce': ('Business Mathematics & Statistics (BMS)', '1st Sitting (12:30 PM to 01:15 PM)'),
+            'Science': ('Chemistry', '1st Sitting (12:30 PM to 01:15 PM)'),
+            'Commerce': ('Accountancy (ACT)', '1st Sitting (12:30 PM to 01:15 PM)'),
             'Arts': ('Economics / Logic', 'Check Sitting: Logic (1st) / Economics (2nd)')
         },
         '2nd_year': {
-            'Science': ('Mathematics', '1st Sitting (10:30 AM to 11:15 AM)'),
-            'Commerce': ('Business Mathematics & Statistics (BMS)', '1st Sitting (10:30 AM to 11:15 AM)'),
+            'Science': ('Chemistry', '1st Sitting (10:30 AM to 11:15 AM)'),
+            'Commerce': ('Accountancy (ACT)', '1st Sitting (10:30 AM to 11:15 AM)'),
             'Arts': ('Economics / Logic', 'Check Sitting: Logic (1st) / Economics (2nd)')
         }
     },
     '2026-11-04': {
         'label': 'Day 6 (04-11-2026 - Wednesday)',
         '1st_year': {
-            'Science': ('Biology', '1st Sitting (12:30 PM to 01:15 PM)'),
+            'Science': ('Zoology & Botany', '1st: Zoology (12:30-01:15 PM) | 2nd: Botany (01:30-02:15 PM)'),
             'Commerce': ('Cost Accounting & Banking (CAC)', '1st Sitting (12:30 PM to 01:15 PM)'),
             'Arts': ('EDN / PSY / Opt Odia / Opt Sanskrit', '1st: EDN/PSY | 2nd: Opt Odia/Sanskrit')
         },
         '2nd_year': {
-            'Science': ('Botany / Zoology', '1st Sitting (10:30 AM to 11:15 AM)'),
+            'Science': ('Zoology & Botany', '1st: Zoology (10:30-11:15 AM) | 2nd: Botany (11:30 AM-12:15 PM)'),
             'Commerce': ('Cost Accounting & Banking (CAC)', '1st Sitting (10:30 AM to 11:15 AM)'),
             'Arts': ('EDN / PSY / Opt Odia / Opt Sanskrit', '1st: EDN/PSY | 2nd: Opt Odia/Sanskrit')
         }
@@ -422,13 +433,82 @@ def process_bot_query(raw_text, sender_phone="Unknown"):
         # General Today's Subject or Routine command (no roll number needed)
         if clean_text in {'TODAY', 'SUBJECT', 'SUBJECTS', 'ROUTINE', 'SCHEDULE', 'TIMETABLE', 'TIME TABLE', 'EXAM', 'AAJ', 'AAJ KA EXAM', 'AAJ KA PAPER', 'AAJ KYA HAI'}:
             today_str = datetime.now(IST).strftime("%Y-%m-%d")
-            if today_str not in SCHEDULE:
-                today_str = '2026-10-30'
-            day_data = SCHEDULE.get(today_str, SCHEDULE['2026-10-30'])
-            day_label = day_data['label']
-            y2 = day_data['2nd_year']
-            y1 = day_data['1st_year']
-            return f"""📅 *EXAM SCHEDULE: {day_label}*
+            
+            # If today is Sunday (01-11-2026), preview Monday!
+            if today_str == '2026-11-01':
+                target_date = '2026-11-02'
+                note_heading = "📅 *EXAM SCHEDULE: Day 4 (02-11-2026 - Monday)*\n*(Note: Aaj Sunday chhutti hai, kal Monday ka schedule neeche hai)*"
+            elif today_str not in SCHEDULE:
+                target_date = '2026-11-02'
+                note_heading = f"📅 *EXAM SCHEDULE: Day 4 (02-11-2026 - Monday)*"
+            else:
+                target_date = today_str
+                day_data = SCHEDULE[target_date]
+                note_heading = f"📅 *EXAM SCHEDULE: {day_data['label']}*"
+
+            if target_date == '2026-11-02':
+                return f"""{note_heading}
+───────────────
+🔹 *+2 2nd Year (Class-XII):*
+• 🧪 Science: *Physics* (10:30 AM - 11:15 AM)
+• 💼 Commerce: *BMS* (10:30 AM - 11:15 AM)
+• 🎨 Arts: *History* (11:30 AM - 12:15 PM)
+
+🔹 *+2 1st Year (Class-XI):*
+• 🧪 Science: *Physics* (12:30 PM - 01:15 PM)
+• 💼 Commerce: *BMS* (12:30 PM - 01:15 PM)
+• 🎨 Arts: *History* (01:30 PM - 02:15 PM)
+───────────────
+👉 Apna *Exam Hall No* janne ke liye apna *Roll No* ya *Naam* bhejein!"""
+
+            elif target_date == '2026-11-03':
+                return f"""{note_heading}
+───────────────
+🔹 *+2 2nd Year (Class-XII):*
+• 1st Sitting (10:30 - 11:15 AM):
+  🧪 Science: *Chemistry*
+  💼 Commerce: *ACT (Accountancy)*
+  🎨 Arts: *Logic*
+• 2nd Sitting (11:30 AM - 12:15 PM):
+  🎨 Arts: *Economics*
+
+🔹 *+2 1st Year (Class-XI):*
+• 1st Sitting (12:30 - 01:15 PM):
+  🧪 Science: *Chemistry*
+  💼 Commerce: *ACT (Accountancy)*
+  🎨 Arts: *Logic*
+• 2nd Sitting (01:30 - 02:15 PM):
+  🎨 Arts: *Economics*
+───────────────
+👉 Apna *Exam Hall No* janne ke liye apna *Roll No* ya *Naam* bhejein!"""
+
+            elif target_date == '2026-11-04':
+                return f"""{note_heading}
+───────────────
+🔹 *+2 2nd Year (Class-XII):*
+• 1st Sitting (10:30 - 11:15 AM):
+  🧪 Science: *Zoology*
+  💼 Commerce: *CAC*
+  🎨 Arts: *Education / Psychology*
+• 2nd Sitting (11:30 AM - 12:15 PM):
+  🌿 Science: *Botany*
+  🎨 Arts: *Optional Odia / Optional Sanskrit*
+
+🔹 *+2 1st Year (Class-XI):*
+• 1st Sitting (12:30 - 01:15 PM):
+  🧪 Science: *Zoology*
+  💼 Commerce: *CAC*
+  🎨 Arts: *Education / Psychology*
+• 2nd Sitting (01:30 - 02:15 PM):
+  🌿 Science: *Botany*
+  🎨 Arts: *Optional Odia / Optional Sanskrit*
+───────────────
+👉 Apna *Exam Hall No* janne ke liye apna *Roll No* ya *Naam* bhejein!"""
+            else:
+                day_data = SCHEDULE.get(target_date, SCHEDULE['2026-10-30'])
+                y2 = day_data['2nd_year']
+                y1 = day_data['1st_year']
+                return f"""{note_heading}
 ───────────────
 🔹 *+2 2nd Year (Class-XII):*
 • 🧪 Science: *{y2['Science'][0]}* (10:30 AM - 11:15 AM)
@@ -580,24 +660,8 @@ Administrative office se sampark karein."""
 
     # Active student day-wise exam (in Indian Standard Time)
     today_str = datetime.now(IST).strftime("%Y-%m-%d")
-    if today_str not in SCHEDULE:
-        today_str = '2026-10-29' # Default during testing
-        
-    day_info = SCHEDULE[today_str]
-    batch_key = '1st_year' if '1st' in st['class_year'] else '2nd_year'
-    exam_details = day_info[batch_key].get(st['stream'], ('Unknown Subject', 'Check Notice'))
-    subject_today, sitting_time = exam_details
-    hall_no = st['hall_no']
-
-    # Send Real-Time Alert to Admin's Telegram!
-    send_telegram_admin_alert(
-        sender_phone=sender_phone,
-        student_name=st['name'],
-        roll_no=st['roll_no'],
-        stream_class=f"{st['class_year']} ({st['stream']})",
-        room=hall_no,
-        user_msg=raw_text
-    )
+    is_sunday_preview = (today_str == '2026-11-01')
+    effective_date = '2026-11-02' if is_sunday_preview else today_str
 
     short_cls = format_short_class(st.get('class_year', ''))
     cls_stream = f"{short_cls} • {st['stream']}" if short_cls else st.get('stream', '')
@@ -616,6 +680,105 @@ Administrative office se sampark karein."""
 {subjs_bullets}
 ───────────────
 👉 Aaj ka exam dekhne ke liye: `{st['roll_no']}` type karein!"""
+
+    # Check Day 4, 5, 6 verified student room schedule
+    if effective_date in {'2026-11-02', '2026-11-03', '2026-11-04'}:
+        student_exams = DAY4_5_6_SCHEDULE.get(lookup_key, {}).get(effective_date, [])
+        if not student_exams:
+            student_exams = DAY4_5_6_SCHEDULE.get(lookup_key.replace('-', ''), {}).get(effective_date, [])
+
+        sunday_header = "🏖️ *Aaj Sunday hai — Kal ka exam details:*\n" if is_sunday_preview else ""
+        day_label = "Tomorrow (Monday, 02-11-2026)" if is_sunday_preview else "Today"
+
+        if student_exams:
+            if len(student_exams) == 1:
+                ex = student_exams[0]
+                sitting_block = f"""> 📖 *{day_label}:* *{ex['subject']}* 🔴
+> 📍 *Hall:* *{ex['hall_no']}* 🔴
+> ⏰ *Time:* {ex['time']}"""
+                hall_alert = ex['hall_no']
+            else:
+                blocks = []
+                rooms = []
+                for idx, ex in enumerate(student_exams, 1):
+                    blocks.append(f"""{idx}️⃣ *Sitting {idx}:*
+> 📖 *Subject:* *{ex['subject']}* 🔴
+> 📍 *Hall:* *{ex['hall_no']}* 🔴
+> ⏰ *Time:* {ex['time']}""")
+                    rooms.append(ex['hall_no'])
+                sitting_block = "\n\n".join(blocks)
+                hall_alert = " & ".join(rooms)
+
+            # Send Real-Time Alert to Admin's Telegram!
+            send_telegram_admin_alert(
+                sender_phone=sender_phone,
+                student_name=st['name'],
+                roll_no=st['roll_no'],
+                stream_class=f"{st['class_year']} ({st['stream']})",
+                room=hall_alert,
+                user_msg=raw_text
+            )
+
+            reply = f"""🏛️ *RBHS EXAM DESK*
+───────────────
+👤 *{st['name']}*
+🆔 Roll No: `{st['roll_no']}`
+🎓 {cls_stream}
+───────────────
+{sunday_header}{sitting_block}
+───────────────
+📚 *All Subjects:*
+{subjs_line}
+───────────────
+⚠️ *15 min pehle pahuchein. All the best!* 👍"""
+            return reply
+
+        else:
+            # Student has NO exam on this day (e.g. Arts student without History on Day 4)
+            send_telegram_admin_alert(
+                sender_phone=sender_phone,
+                student_name=st['name'],
+                roll_no=st['roll_no'],
+                stream_class=f"{st['class_year']} ({st['stream']})",
+                room="NO EXAM TODAY",
+                user_msg=raw_text
+            )
+
+            day_word = "Kal (Monday, 02-Nov)" if is_sunday_preview else f"Aaj ({effective_date})"
+            reply = f"""🏛️ *RBHS EXAM DESK*
+───────────────
+👤 *{st['name']}*
+🆔 Roll No: `{st['roll_no']}`
+🎓 {cls_stream}
+───────────────
+🏖️ *{day_word} aapka koi exam scheduled nahi hai.*
+(Ye subject aapke registered subjects me nahi hai).
+───────────────
+📚 *Aapke Registered Subjects:*
+{subjs_line}
+───────────────
+💡 *Exam schedule janne ke liye 'ROUTINE' type karein.*"""
+            return reply
+
+    # Fallback for earlier testing dates (Day 1, 2, 3)
+    if today_str not in SCHEDULE:
+        today_str = '2026-10-29' # Default during testing
+        
+    day_info = SCHEDULE[today_str]
+    batch_key = '1st_year' if '1st' in st['class_year'] else '2nd_year'
+    exam_details = day_info[batch_key].get(st['stream'], ('Unknown Subject', 'Check Notice'))
+    subject_today, sitting_time = exam_details
+    hall_no = st['hall_no']
+
+    # Send Real-Time Alert to Admin's Telegram!
+    send_telegram_admin_alert(
+        sender_phone=sender_phone,
+        student_name=st['name'],
+        roll_no=st['roll_no'],
+        stream_class=f"{st['class_year']} ({st['stream']})",
+        room=hall_no,
+        user_msg=raw_text
+    )
 
     reply = f"""🏛️ *RBHS EXAM DESK*
 ───────────────

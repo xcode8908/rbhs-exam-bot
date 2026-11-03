@@ -2,6 +2,7 @@ import os
 import json
 import re
 from datetime import datetime, timezone, timedelta
+from collections import defaultdict
 
 # Indian Standard Time (IST) Timezone for accurate Indian exam scheduling
 IST = timezone(timedelta(hours=5, minutes=30))
@@ -113,98 +114,199 @@ init_db()
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "8965596009:AAHRANWd1oJpVapa7tHmVJqi3oXbdt-nCsI")
 TELEGRAM_ADMIN_CHAT_ID = os.environ.get("TELEGRAM_ADMIN_CHAT_ID", "6161463701")
 
-# Load verified Day 4, 5, 6 student room allocations from Day Wise Exam System
-DAY_SCHEDULE_PATH = os.path.join(os.path.dirname(__file__), 'DAY4_5_6_STUDENT_EXAM_SCHEDULE.json')
-DAY4_5_6_SCHEDULE = {}
-if os.path.exists(DAY_SCHEDULE_PATH):
-    try:
-        with open(DAY_SCHEDULE_PATH, 'r', encoding='utf-8') as f:
-            DAY4_5_6_SCHEDULE = json.load(f)
-        print(f"✅ Loaded Day 4, 5, 6 verified student room allocations ({len(DAY4_5_6_SCHEDULE)} keys)!")
-    except Exception as e:
-        print(f"Error loading DAY4_5_6_SCHEDULE: {e}")
-
-# Exam schedule definition
-SCHEDULE = {
-    '2026-10-29': {
-        'label': 'Day 1 (29-10-2026 - Thursday)',
-        '1st_year': {
-            'Science': ('MIL (Odia / Alt English)', '1st Sitting (12:30 PM to 01:15 PM)'),
-            'Commerce': ('MIL (Odia)', '1st Sitting (12:30 PM to 01:15 PM)'),
-            'Arts': ('MIL (Odia)', '2nd Sitting (01:30 PM to 02:15 PM)')
-        },
-        '2nd_year': {
-            'Science': ('MIL (Odia / Hindi / Alt Eng)', '1st Sitting (10:30 AM to 11:15 AM)'),
-            'Commerce': ('MIL (Odia)', '1st Sitting (10:30 AM to 11:15 AM)'),
-            'Arts': ('MIL (Odia)', '2nd Sitting (11:30 AM to 12:15 PM)')
-        }
-    },
-    '2026-10-30': {
-        'label': 'Day 2 (30-10-2026 - Friday)',
-        '1st_year': {
-            'Science': ('English', '1st Sitting (12:30 PM to 01:15 PM)'),
-            'Commerce': ('English', '1st Sitting (12:30 PM to 01:15 PM)'),
-            'Arts': ('English', '2nd Sitting (01:30 PM to 02:15 PM)')
-        },
-        '2nd_year': {
-            'Science': ('English', '1st Sitting (10:30 AM to 11:15 AM)'),
-            'Commerce': ('English', '1st Sitting (10:30 AM to 11:15 AM)'),
-            'Arts': ('English', '2nd Sitting (11:30 AM to 12:15 PM)')
-        }
-    },
-    '2026-10-31': {
-        'label': 'Day 3 (31-10-2026 - Saturday)',
-        '1st_year': {
-            'Science': ('Mathematics', '1st Sitting (12:30 PM to 01:15 PM)'),
-            'Commerce': ('Business Studies & Management (BSM)', '1st Sitting (12:30 PM to 01:15 PM)'),
-            'Arts': ('Political Science', '2nd Sitting (01:30 PM to 02:15 PM)')
-        },
-        '2nd_year': {
-            'Science': ('Mathematics', '1st Sitting (10:30 AM to 11:15 AM)'),
-            'Commerce': ('Business Studies & Management (BSM)', '1st Sitting (10:30 AM to 11:15 AM)'),
-            'Arts': ('Political Science', '2nd Sitting (11:30 AM to 12:15 PM)')
-        }
-    },
-    '2026-11-02': {
-        'label': 'Day 4 (02-11-2026 - Monday)',
-        '1st_year': {
-            'Science': ('Physics', '1st Sitting (12:30 PM to 01:15 PM)'),
-            'Commerce': ('Business Mathematics & Statistics (BMS)', '1st Sitting (12:30 PM to 01:15 PM)'),
-            'Arts': ('History', '2nd Sitting (01:30 PM to 02:15 PM)')
-        },
-        '2nd_year': {
-            'Science': ('Physics', '1st Sitting (10:30 AM to 11:15 AM)'),
-            'Commerce': ('Business Mathematics & Statistics (BMS)', '1st Sitting (10:30 AM to 11:15 AM)'),
-            'Arts': ('History', '2nd Sitting (11:30 AM to 12:15 PM)')
-        }
-    },
-    '2026-11-03': {
-        'label': 'Day 5 (03-11-2026 - Tuesday)',
-        '1st_year': {
-            'Science': ('Chemistry', '1st Sitting (12:30 PM to 01:15 PM)'),
-            'Commerce': ('Accountancy (ACT)', '1st Sitting (12:30 PM to 01:15 PM)'),
-            'Arts': ('Economics / Logic', 'Check Sitting: Logic (1st) / Economics (2nd)')
-        },
-        '2nd_year': {
-            'Science': ('Chemistry', '1st Sitting (10:30 AM to 11:15 AM)'),
-            'Commerce': ('Accountancy (ACT)', '1st Sitting (10:30 AM to 11:15 AM)'),
-            'Arts': ('Economics / Logic', 'Check Sitting: Logic (1st) / Economics (2nd)')
-        }
-    },
-    '2026-11-04': {
-        'label': 'Day 6 (04-11-2026 - Wednesday)',
-        '1st_year': {
-            'Science': ('Zoology & Botany', '1st: Zoology (12:30-01:15 PM) | 2nd: Botany (01:30-02:15 PM)'),
-            'Commerce': ('Cost Accounting & Banking (CAC)', '1st Sitting (12:30 PM to 01:15 PM)'),
-            'Arts': ('EDN / PSY / Opt Odia / Opt Sanskrit', '1st: EDN/PSY | 2nd: Opt Odia/Sanskrit')
-        },
-        '2nd_year': {
-            'Science': ('Zoology & Botany', '1st: Zoology (10:30-11:15 AM) | 2nd: Botany (11:30 AM-12:15 PM)'),
-            'Commerce': ('Cost Accounting & Banking (CAC)', '1st Sitting (10:30 AM to 11:15 AM)'),
-            'Arts': ('EDN / PSY / Opt Odia / Opt Sanskrit', '1st: EDN/PSY | 2nd: Opt Odia/Sanskrit')
-        }
-    }
+# Subject normalization dictionary for teacher and student queries
+SUBJECT_ALIASES = {
+    'history': 'History', 'hist': 'History', 'itihas': 'History',
+    'political science': 'Political Science', 'pol sc': 'Political Science', 'polsc': 'Political Science', 'pol': 'Political Science', 'politics': 'Political Science',
+    'economics': 'Economics', 'eco': 'Economics', 'econ': 'Economics',
+    'logic': 'Logic', 'log': 'Logic',
+    'education': 'Education', 'edn': 'Education', 'edu': 'Education',
+    'psychology': 'Psychology', 'psy': 'Psychology',
+    'optional odia': 'Optional Odia', 'opt odia': 'Optional Odia', 'odia opt': 'Optional Odia',
+    'optional sanskrit': 'Optional Sanskrit', 'opt sanskrit': 'Optional Sanskrit', 'sanskrit opt': 'Optional Sanskrit', 'sanskrit': 'Optional Sanskrit', 'sns': 'Optional Sanskrit',
+    'physics': 'Physics', 'phy': 'Physics',
+    'chemistry': 'Chemistry', 'chem': 'Chemistry',
+    'mathematics': 'Mathematics', 'math': 'Mathematics', 'maths': 'Mathematics',
+    'biology': 'Biology', 'bio': 'Biology', 'botany': 'Biology', 'zoology': 'Biology', 'zoo': 'Biology', 'bot': 'Biology',
+    'accountancy': 'Accountancy', 'act': 'Accountancy', 'acc': 'Accountancy', 'accounts': 'Accountancy',
+    'bms': 'Business Mathematics and Statistics', 'business math': 'Business Mathematics and Statistics', 'business mathematics': 'Business Mathematics and Statistics',
+    'bsm': 'Business Studies and Management', 'business studies': 'Business Studies and Management', 'bst': 'Business Studies and Management',
+    'cac': 'Banking Insurance and Cost Accounting', 'cost accounting': 'Banking Insurance and Cost Accounting', 'banking': 'Banking Insurance and Cost Accounting', 'cost': 'Banking Insurance and Cost Accounting',
+    'english': 'English', 'eng': 'English',
+    'mil odia': 'MIL Odia', 'mil': 'MIL Odia', 'odia': 'MIL Odia',
+    'alt english': 'MIL Alternative English', 'alternative english': 'MIL Alternative English',
+    'hindi': 'MIL Hindi', 'mil hindi': 'MIL Hindi'
 }
+
+def build_subject_roster(student_dict):
+    """Builds an in-memory index of subject -> { '1st_year': [roll_no, ...], '2nd_year': [roll_no, ...] }"""
+    roster = defaultdict(lambda: {'1st_year': [], '2nd_year': []})
+    if not student_dict:
+        return roster
+    for k, s in student_dict.items():
+        if '-' not in k or s.get('is_tc'):
+            continue
+        roll = s['roll_no']
+        is_y1 = '1st' in s.get('class_year', '')
+        bucket = '1st_year' if is_y1 else '2nd_year'
+        for subj in s.get('subjects', []):
+            subj_clean = subj.strip()
+            if roll not in roster[subj_clean][bucket]:
+                roster[subj_clean][bucket].append(roll)
+    for subj in roster:
+        roster[subj]['1st_year'].sort()
+        roster[subj]['2nd_year'].sort()
+    return roster
+
+SUBJECT_ROSTER = build_subject_roster(STUDENT_DB)
+print(f"✅ Indexed {len(SUBJECT_ROSTER)} subjects in SUBJECT_ROSTER!")
+
+
+def format_rolls_block(roll_list, per_line=5):
+    lines = []
+    for i in range(0, len(roll_list), per_line):
+        lines.append(', '.join(roll_list[i:i+per_line]))
+    return '\n'.join(lines)
+
+
+def handle_subject_query(query_text):
+    raw_q = query_text.strip().lower()
+    
+    # Check if specific year requested: e.g. "hist 1st", "history 2nd", "logic 1st", "history class 11"
+    year_filter = None
+    if re.search(r'\b(1st|1|xi|11|26|2026)\b', raw_q):
+        year_filter = '1st_year'
+    elif re.search(r'\b(2nd|2|xii|12|25|2025)\b', raw_q):
+        year_filter = '2nd_year'
+        
+    # Clean prefixes like "sub", "subject", "subjects", "rolls", "students", and year words
+    q = re.sub(r'\b(1st|1|xi|11|26|2026|2nd|2|xii|12|25|2025|year|yr|class|batch|\+2|plus\s*two)\b', ' ', raw_q)
+    q = re.sub(r'^(sub(?:ject)?s?\s*[:\-]?\s*)', ' ', q)
+    q = re.sub(r'\b(students?|rolls?|roll\s*no|list|total|count|me\s*kitne|kitne\s*students?|hai|ka|ki|ke|dekhao|batao)\b', ' ', q)
+    q = re.sub(r'[^a-z\s]', ' ', q).strip()
+    q = re.sub(r'\s+', ' ', q).strip()
+    
+    if q not in SUBJECT_ALIASES:
+        return None
+        
+    canonical_subj = SUBJECT_ALIASES[q]
+    subj_data = SUBJECT_ROSTER.get(canonical_subj, {'1st_year': [], '2nd_year': []})
+    y1_rolls = subj_data['1st_year']
+    y2_rolls = subj_data['2nd_year']
+    total_cnt = len(y1_rolls) + len(y2_rolls)
+    
+    short_code = q.split()[0].upper()
+
+    # If filtered to 1st year only
+    if year_filter == '1st_year':
+        rolls_str = format_rolls_block(y1_rolls) if y1_rolls else "Koi student enrolled nahi hai."
+        return f"""📚 *{canonical_subj.upper()} — +2 1ST YEAR (CLASS-XI)*
+───────────────
+📊 *Total Enrolled Students:* *{len(y1_rolls)}*
+───────────────
+📋 *Roll Numbers:*
+{rolls_str}
+───────────────
+💡 *2nd Year ke liye bhejein:* `{short_code} 2ND`"""
+
+    # If filtered to 2nd year only
+    if year_filter == '2nd_year':
+        rolls_str = format_rolls_block(y2_rolls) if y2_rolls else "Koi student enrolled nahi hai."
+        return f"""📚 *{canonical_subj.upper()} — +2 2ND YEAR (CLASS-XII)*
+───────────────
+📊 *Total Enrolled Students:* *{len(y2_rolls)}*
+───────────────
+📋 *Roll Numbers:*
+{rolls_str}
+───────────────
+💡 *1st Year ke liye bhejein:* `{short_code} 1ST`"""
+
+    # General overview: if total <= 220, display all rolls directly!
+    if total_cnt <= 220:
+        blocks = []
+        if y1_rolls:
+            blocks.append(f"🎓 *+2 1st Year ({len(y1_rolls)} Students):*\n" + format_rolls_block(y1_rolls))
+        if y2_rolls:
+            blocks.append(f"🎓 *+2 2nd Year ({len(y2_rolls)} Students):*\n" + format_rolls_block(y2_rolls))
+        rolls_display = "\n\n".join(blocks)
+        return f"""🏛️ *RBHS SUBJECT ROSTER: {canonical_subj.upper()}*
+───────────────
+📊 *Total Enrolled Students:* *{total_cnt}*
+• +2 1st Year (XI): *{len(y1_rolls)}*
+• +2 2nd Year (XII): *{len(y2_rolls)}*
+───────────────
+{rolls_display}
+───────────────
+👉 Student details ke liye: Roll No bhejein (`IA26-001`)"""
+
+    # For larger subjects (like History, Economics, Pol. Science, Opt Odia):
+    y1_range = f"`{y1_rolls[0]}` to `{y1_rolls[-1]}`" if y1_rolls else "None"
+    y2_range = f"`{y2_rolls[0]}` to `{y2_rolls[-1]}`" if y2_rolls else "None"
+    
+    return f"""🏛️ *RBHS SUBJECT ROSTER: {canonical_subj.upper()}*
+───────────────
+📊 *Total Enrolled Students:* *{total_cnt}*
+• 🎓 *+2 1st Year (Class-XI):* *{len(y1_rolls)} Students*
+  ↳ Range: {y1_range}
+• 🎓 *+2 2nd Year (Class-XII):* *{len(y2_rolls)} Students*
+  ↳ Range: {y2_range}
+───────────────
+📋 *Puri Roll Number List dekhne ke liye bhejein:*
+👉 `{short_code} 1ST` (1st Year ke sabhi {len(y1_rolls)} rolls)
+👉 `{short_code} 2ND` (2nd Year ke sabhi {len(y2_rolls)} rolls)
+───────────────
+💡 *Kisi student ke subjects janne ke liye unka Roll No bhejein.*"""
+
+
+def get_all_subjects_summary():
+    arts_subjs = [
+        ('Political Science', 'Pol. Science'),
+        ('History', 'History'),
+        ('Economics', 'Economics'),
+        ('Optional Odia', 'Optional Odia'),
+        ('Optional Sanskrit', 'Optional Sanskrit'),
+        ('Education', 'Education'),
+        ('Psychology', 'Psychology'),
+        ('Logic', 'Logic')
+    ]
+    lines_arts = []
+    for full_name, display in arts_subjs:
+        d = SUBJECT_ROSTER.get(full_name, {'1st_year': [], '2nd_year': []})
+        y1, y2 = len(d['1st_year']), len(d['2nd_year'])
+        lines_arts.append(f"• {display}: *{y1+y2}* (XI: {y1} | XII: {y2})")
+
+    sci_subjs = [('Physics', 'Physics'), ('Chemistry', 'Chemistry'), ('Mathematics', 'Mathematics'), ('Biology', 'Biology')]
+    lines_sci = []
+    for full_name, display in sci_subjs:
+        d = SUBJECT_ROSTER.get(full_name, {'1st_year': [], '2nd_year': []})
+        y1, y2 = len(d['1st_year']), len(d['2nd_year'])
+        lines_sci.append(f"• {display}: *{y1+y2}* (XI: {y1} | XII: {y2})")
+
+    com_subjs = [
+        ('Accountancy', 'Accountancy (ACT)'),
+        ('Business Mathematics and Statistics', 'BMS'),
+        ('Business Studies and Management', 'BSM'),
+        ('Banking Insurance and Cost Accounting', 'CAC')
+    ]
+    lines_com = []
+    for full_name, display in com_subjs:
+        d = SUBJECT_ROSTER.get(full_name, {'1st_year': [], '2nd_year': []})
+        y1, y2 = len(d['1st_year']), len(d['2nd_year'])
+        lines_com.append(f"• {display}: *{y1+y2}* (XI: {y1} | XII: {y2})")
+
+    return f"""🏛️ *RBHS SUBJECT ENROLLMENT SUMMARY*
+───────────────
+🎨 *ARTS ELECTIVES:*
+{chr(10).join(lines_arts)}
+
+🧪 *SCIENCE:*
+{chr(10).join(lines_sci)}
+
+💼 *COMMERCE:*
+{chr(10).join(lines_com)}
+───────────────
+👉 Kisi subject ke sabhi roll numbers janne ke liye subject ka naam bhejein (e.g. `HISTORY`, `LOGIC`, `EDN`, `PHYSICS`).
+👉 Kisi student ke subjects janne ke liye unka Roll No bhejein (`IA26-001`)."""
 
 
 def log_user_interaction(phone, roll_no, name, stream, class_year, raw_msg):
@@ -275,7 +377,7 @@ def send_telegram_admin_alert(sender_phone, student_name, roll_no, stream_class,
 
     def _send():
         now_str = datetime.now(IST).strftime("%d-%b-%Y %I:%M:%S %p")
-        text = f"""🔔 *NEW EXAM BOT QUERY ALERT*
+        text = f"""🔔 *RBHS BOT QUERY ALERT*
 ━━━━━━━━━━━━━━━━━━━━━━━━━
 📱 *Student Phone:* `{sender_phone}`
 👤 *Student Name:* {student_name}
@@ -417,125 +519,66 @@ def format_short_class(class_year_str):
 def process_bot_query(raw_text, sender_phone="Unknown"):
     text = raw_text.strip().upper()
     
-    # Check if query explicitly asks for subjects only (e.g. "subjects is26001", "sub is26001")
-    is_subject_only_query = bool(re.search(r'\b(SUB|SUBJECTS?|ALL\s*SUBJECTS?)\b', text, re.IGNORECASE))
+    # 1. Check if user asked for overall subject summary / statistics
+    clean_text = re.sub(r'[^a-zA-Z0-9\s]', ' ', raw_text).strip().upper()
     
+    # Summary triggers
+    if clean_text in {'SUBJECT', 'SUBJECTS', 'ALL SUBJECTS', 'ALL SUBJECT', 'SUMMARY', 'TOTAL', 'STRENGTH', 'COUNT', 'ROSTER', 'LIST', 'SUBJECT LIST', 'SUBJECT WISE', 'ALL'}:
+        log_user_interaction(sender_phone, "TEACHER_SUMMARY", "Subject Enrollment Summary", "N/A", "N/A", raw_text)
+        return get_all_subjects_summary()
+
+    # 2. Check if user asked for a specific Subject (e.g. "HISTORY", "LOGIC", "EDN", "HISTORY 1ST", "PHYSICS 2ND", "POL SC")
+    subject_response = handle_subject_query(raw_text)
+    if subject_response:
+        log_user_interaction(sender_phone, "SUBJECT_QUERY", raw_text.strip().upper()[:25], "N/A", "N/A", raw_text)
+        send_telegram_admin_alert(
+            sender_phone=sender_phone,
+            student_name="Teacher/Student Query",
+            roll_no=raw_text.strip().upper()[:20],
+            stream_class="Subject Lookup",
+            room="Subject Desk",
+            user_msg=raw_text
+        )
+        return subject_response
+
     # Clean text to strip prefixes if glued (e.g. subis26001 -> is26001, sub: is26-001 -> is26-001)
     cleaned_input = re.sub(r'(?i)^(sub(?:jects?)?|all\s*subjects?|roll\s*no?)\s*[:=\-]?\s*', '', raw_text.strip())
-    
-    # 1. Smart Regex Matcher: catches IA/IS/IC (or A/S/C) + 25/26 + 1 to 4 digits (across both original and cleaned input)
+
+    # 3. Smart Regex Matcher for Student Roll No: catches IA/IS/IC (or A/S/C) + 25/26 + 1 to 4 digits
     match = re.search(r'\b(I?[ASC])\s*[-]?\s*(2[56])\s*[-]?\s*(\d{1,4})\b', text, re.IGNORECASE) or \
             re.search(r'\b(I?[ASC])\s*[-]?\s*(2[56])\s*[-]?\s*(\d{1,4})\b', cleaned_input, re.IGNORECASE)
-    
+
     if not match:
-        clean_text = re.sub(r'[^a-zA-Z\s]', ' ', raw_text).strip().upper()
-        
-        # General Today's Subject or Routine command (no roll number needed)
-        if clean_text in {'TODAY', 'SUBJECT', 'SUBJECTS', 'ROUTINE', 'SCHEDULE', 'TIMETABLE', 'TIME TABLE', 'EXAM', 'AAJ', 'AAJ KA EXAM', 'AAJ KA PAPER', 'AAJ KYA HAI'}:
-            today_str = datetime.now(IST).strftime("%Y-%m-%d")
-            
-            # If today is Sunday (01-11-2026), preview Monday!
-            if today_str == '2026-11-01':
-                target_date = '2026-11-02'
-                note_heading = "📅 *EXAM SCHEDULE: Day 4 (02-11-2026 - Monday)*\n*(Note: Aaj Sunday chhutti hai, kal Monday ka schedule neeche hai)*"
-            elif today_str not in SCHEDULE:
-                target_date = '2026-11-02'
-                note_heading = f"📅 *EXAM SCHEDULE: Day 4 (02-11-2026 - Monday)*"
-            else:
-                target_date = today_str
-                day_data = SCHEDULE[target_date]
-                note_heading = f"📅 *EXAM SCHEDULE: {day_data['label']}*"
-
-            if target_date == '2026-11-02':
-                return f"""{note_heading}
-───────────────
-🔹 *+2 2nd Year (Class-XII):*
-• 🧪 Science: *Physics* (10:30 AM - 11:15 AM)
-• 💼 Commerce: *BMS* (10:30 AM - 11:15 AM)
-• 🎨 Arts: *History* (11:30 AM - 12:15 PM)
-
-🔹 *+2 1st Year (Class-XI):*
-• 🧪 Science: *Physics* (12:30 PM - 01:15 PM)
-• 💼 Commerce: *BMS* (12:30 PM - 01:15 PM)
-• 🎨 Arts: *History* (01:30 PM - 02:15 PM)
-───────────────
-👉 Apna *Exam Hall No* janne ke liye apna *Roll No* ya *Naam* bhejein!"""
-
-            elif target_date == '2026-11-03':
-                return f"""{note_heading}
-───────────────
-🔹 *+2 2nd Year (Class-XII):*
-• 1st Sitting (10:30 - 11:15 AM):
-  🧪 Science: *Chemistry*
-  💼 Commerce: *ACT (Accountancy)*
-  🎨 Arts: *Logic*
-• 2nd Sitting (11:30 AM - 12:15 PM):
-  🎨 Arts: *Economics*
-
-🔹 *+2 1st Year (Class-XI):*
-• 1st Sitting (12:30 - 01:15 PM):
-  🧪 Science: *Chemistry*
-  💼 Commerce: *ACT (Accountancy)*
-  🎨 Arts: *Logic*
-• 2nd Sitting (01:30 - 02:15 PM):
-  🎨 Arts: *Economics*
-───────────────
-👉 Apna *Exam Hall No* janne ke liye apna *Roll No* ya *Naam* bhejein!"""
-
-            elif target_date == '2026-11-04':
-                return f"""{note_heading}
-───────────────
-🔹 *+2 2nd Year (Class-XII):*
-• 1st Sitting (10:30 - 11:15 AM):
-  🧪 Science: *Zoology*
-  💼 Commerce: *CAC*
-  🎨 Arts: *Education / Psychology*
-• 2nd Sitting (11:30 AM - 12:15 PM):
-  🌿 Science: *Botany*
-  🎨 Arts: *Optional Odia / Optional Sanskrit*
-
-🔹 *+2 1st Year (Class-XI):*
-• 1st Sitting (12:30 - 01:15 PM):
-  🧪 Science: *Zoology*
-  💼 Commerce: *CAC*
-  🎨 Arts: *Education / Psychology*
-• 2nd Sitting (01:30 - 02:15 PM):
-  🌿 Science: *Botany*
-  🎨 Arts: *Optional Odia / Optional Sanskrit*
-───────────────
-👉 Apna *Exam Hall No* janne ke liye apna *Roll No* ya *Naam* bhejein!"""
-            else:
-                day_data = SCHEDULE.get(target_date, SCHEDULE['2026-10-30'])
-                y2 = day_data['2nd_year']
-                y1 = day_data['1st_year']
-                return f"""{note_heading}
-───────────────
-🔹 *+2 2nd Year (Class-XII):*
-• 🧪 Science: *{y2['Science'][0]}* (10:30 AM - 11:15 AM)
-• 💼 Commerce: *{y2['Commerce'][0]}* (10:30 AM - 11:15 AM)
-• 🎨 Arts: *{y2['Arts'][0]}* (11:30 AM - 12:15 PM)
-
-🔹 *+2 1st Year (Class-XI):*
-• 🧪 Science: *{y1['Science'][0]}* (12:30 PM - 01:15 PM)
-• 💼 Commerce: *{y1['Commerce'][0]}* (12:30 PM - 01:15 PM)
-• 🎨 Arts: *{y1['Arts'][0]}* (01:30 PM - 02:15 PM)
-───────────────
-👉 Apna *Exam Hall No* janne ke liye apna *Roll No* ya *Naam* bhejein!"""
-
+        # Check if greeting or menu request
         is_greeting = clean_text in GREETINGS_OR_COMMANDS or len(clean_text) < 2
         
-        # If user sent a greeting or menu request
-        if is_greeting:
-            log_user_interaction(sender_phone, "GUEST", "New Student Visitor", "Unknown", "Unknown", raw_text)
-            return """🏛️ *RBHS EXAM DESK*
+        # Check if past exam query
+        if clean_text in {'EXAM', 'ROUTINE', 'SCHEDULE', 'TIMETABLE', 'TIME TABLE', 'AAJ KA EXAM', 'TODAY', 'TODAY EXAM'}:
+            return """🏛️ *RBHS ACADEMIC DESK*
 ───────────────
-Check Today's Paper, Hall & Timing:
+📢 *Half-Yearly Exams samapt ho chuke hain.*
 
-• *Roll No:* `IS26-001` ya `is26001`
-• *Naam:* `Rahul Das` ya `Smaranika`
-• *Routine:* `TODAY` ya `ROUTINE`
+Ab aap is bot se **Subject Lists & Student Profiles** check kar sakte hain:
+• *Subject Wise Total Students & Rolls:* Subject ka naam bhejein (e.g. `HISTORY`, `LOGIC`, `EDN`, `PHYSICS`)
+• *All Subjects Summary:* `SUBJECTS` ya `TOTAL`
+• *Student Profile & Registered Subjects:* Student ka Roll No bhejein (`IA26-001`) ya Naam (`Rahul`)
 ───────────────
-👇 *Apna Roll No ya Naam likh kar bhejein:*"""
+👇 *Apna Roll No ya Subject ka naam bhejein:*"""
+
+        if is_greeting:
+            log_user_interaction(sender_phone, "GUEST", "Academic Desk Visitor", "Unknown", "Unknown", raw_text)
+            return """🏛️ *RBHS ACADEMIC DESK*
+───────────────
+Aap kisi bhi student ke registered subjects ya subject-wise total roll numbers jaan sakte hain:
+
+📌 *Commands & Examples:*
+• *Student Profile:* Roll No bhejein (`IA26-001` ya `is26001`)
+• *Student Search by Name:* Student ka naam bhejein (`Rahul Das`)
+• *Subject Roll List:* Subject ka naam bhejein (`HISTORY`, `LOGIC`, `EDN`, `PHYSICS`)
+• *Class-wise Filter:* `HISTORY 1ST` ya `HISTORY 2ND`
+• *Total Summary:* `SUBJECTS` ya `TOTAL`
+───────────────
+👇 *Apna Roll No ya Subject ka naam bhejein:*"""
 
         # Otherwise, attempt to find student by Name (case-insensitive)
         name_matches = find_students_by_name(raw_text)
@@ -546,11 +589,13 @@ Check Today's Paper, Hall & Timing:
 ───────────────
 *"{raw_text.strip()}"* college record me nahi mila.
 
-💡 *Tips:*
-• Naam ki spelling check karein (*Rahul Sahoo*)
-• Ya Roll No bhejein (`IS26-001` / `is26001`)"""
+💡 *Aap ye bhej sakte hain:*
+• *Roll No:* `IA26-001`, `IS26-005`, `IC26-010`
+• *Student Name:* `Rahul Das`, `Smaranika`
+• *Subject Details:* `HISTORY`, `LOGIC`, `EDN`, `PHYSICS`
+• *All Subjects Summary:* `SUBJECTS`"""
 
-        # If exactly 1 student found
+        # If exactly 1 student found by name
         if len(name_matches) == 1:
             st = name_matches[0]
             log_user_interaction(sender_phone, st['roll_no'], st['name'], st['stream'], st['class_year'], raw_text)
@@ -559,21 +604,24 @@ Check Today's Paper, Hall & Timing:
                 student_name=st['name'],
                 roll_no=st['roll_no'],
                 stream_class=f"{st['class_year']} ({st['stream']})",
-                room=st.get('hall_no', 'N/A'),
+                room="Academic Profile",
                 user_msg=f"[Name Search] {raw_text}"
             )
             short_cls = format_short_class(st.get('class_year', ''))
             cls_stream = f"{short_cls} • {st['stream']}" if short_cls else st.get('stream', '')
-            hall = st.get('hall_no', 'Notice Board')
+            subjs_list = st.get('subjects') or []
+            subjs_bullets = "\n".join([f"• {s}" for s in subjs_list]) if subjs_list else 'Check College Notice'
 
-            return f"""🔍 *STUDENT FOUND*
+            return f"""🏛️ *RBHS STUDENT PROFILE*
 ───────────────
 👤 *{st['name']}*
 > 🆔 *Roll No:* `{st['roll_no']}` 🔴
 🎓 {cls_stream}
-📍 Hall: *{hall}*
 ───────────────
-👉 Aaj ke paper ke liye bhejein: `{st['roll_no']}`"""
+📚 *Registered Subjects ({len(subjs_list)}):*
+{subjs_bullets}
+───────────────
+💡 *Kisi aur student ka profile dekhne ke liye unka Roll No bhejein.*"""
 
         # If multiple students found with the same name
         log_user_interaction(sender_phone, "MULTI_MATCH", f"Matches: {len(name_matches)}", "Unknown", "Unknown", raw_text)
@@ -583,10 +631,9 @@ Check Today's Paper, Hall & Timing:
             emoji = num_emojis[idx] if idx < len(num_emojis) else f"{idx+1}."
             short_cls = format_short_class(st.get('class_year', ''))
             cls_str = f"{short_cls} {st.get('stream', '')}".strip()
-            hall_str = st.get('hall_no', 'N/A')
             list_text.append(
                 f"{emoji} *{st['name']}*\n"
-                f"   ↳ 🆔 `{st['roll_no']}` 🔴 | *{hall_str}* ({cls_str})"
+                f"   ↳ 🆔 `{st['roll_no']}` 🔴 ({cls_str})"
             )
 
         results_formatted = "\n\n".join(list_text)
@@ -598,9 +645,9 @@ Check Today's Paper, Hall & Timing:
 ───────────────
 {results_formatted}{extra_note}
 ───────────────
-👉 Routine dekhne ke liye apna *Roll No* bhejein."""
+👉 Registered subjects dekhne ke liye student ka *Roll No* bhejein (e.g. `{name_matches[0]['roll_no']}`)."""
 
-    # 2. Roll Number matched
+    # 4. Roll Number matched
     stream = match.group(1).upper()
     if not stream.startswith('I'):
         stream = 'I' + stream
@@ -612,7 +659,7 @@ Check Today's Paper, Hall & Timing:
         # Live Query Neon Cloud Database in real-time
         try:
             clean_search = lookup_key.replace('-', '')
-            sql = f"SELECT roll_no, name, stream, class_year, batch, is_tc, status, hall_no, exam_timing, subjects FROM students WHERE UPPER(roll_no) = '{lookup_key}' OR REPLACE(UPPER(roll_no), '-', '') = '{clean_search}' LIMIT 1;"
+            sql = f"SELECT roll_no, name, stream, class_year, batch, is_tc, status, subjects FROM students WHERE UPPER(roll_no) = '{lookup_key}' OR REPLACE(UPPER(roll_no), '-', '') = '{clean_search}' LIMIT 1;"
             rows = neon_query(sql, return_rows=True)
             if rows and len(rows) > 0:
                 r = rows[0]
@@ -626,9 +673,7 @@ Check Today's Paper, Hall & Timing:
                     'is_tc': bool(r.get('is_tc')),
                     'status': r.get('status', 'ACTIVE'),
                     'subjects': subjs,
-                    'subjects_formatted': "\n".join([f"  • {s}" for s in subjs]),
-                    'hall_no': r.get('hall_no', 'Not Assigned'),
-                    'exam_timing': r.get('exam_timing', 'Check Notice')
+                    'subjects_formatted': "\n".join([f"  • {s}" for s in subjs])
                 }
         except Exception as e:
             print(f"Neon live lookup error: {e}")
@@ -653,147 +698,37 @@ Kripya Roll No check karke dobara bhejein."""
         return f"""⚠️ *COLLEGE LEAVING / TC ISSUED*
 ───────────────
 🆔 *Roll No:* `{st['roll_no']}`
+👤 *Name:* *{st['name']}*
 🎓 {short_cls} ({st['stream']})
 ───────────────
 Aapka TC issue ho chuka hai. 
 Administrative office se sampark karein."""
 
-    # Active student day-wise exam (in Indian Standard Time)
-    today_str = datetime.now(IST).strftime("%Y-%m-%d")
-    is_sunday_preview = (today_str == '2026-11-01')
-    effective_date = '2026-11-02' if is_sunday_preview else today_str
-
     short_cls = format_short_class(st.get('class_year', ''))
     cls_stream = f"{short_cls} • {st['stream']}" if short_cls else st.get('stream', '')
     subjs_list = st.get('subjects') or []
-    subjs_line = ", ".join(subjs_list) if subjs_list else 'Check College Notice'
+    subjs_bullets = "\n".join([f"• {s}" for s in subjs_list]) if subjs_list else 'Check College Notice'
 
-    # If student explicitly asked for subjects (e.g. "subjects is26001" or "sub is26001")
-    if is_subject_only_query:
-        subjs_bullets = "\n".join([f"• {s}" for s in subjs_list]) if subjs_list else 'Check College Notice'
-        return f"""📚 *REGISTERED SUBJECTS*
-───────────────
-👤 *{st['name']}*
-> 🆔 *Roll No:* `{st['roll_no']}` 🔴
-🎓 {cls_stream}
-───────────────
-{subjs_bullets}
-───────────────
-👉 Aaj ka exam dekhne ke liye: `{st['roll_no']}` type karein!"""
-
-    # Check Day 4, 5, 6 verified student room schedule
-    if effective_date in {'2026-11-02', '2026-11-03', '2026-11-04'}:
-        student_exams = DAY4_5_6_SCHEDULE.get(lookup_key, {}).get(effective_date, [])
-        if not student_exams:
-            student_exams = DAY4_5_6_SCHEDULE.get(lookup_key.replace('-', ''), {}).get(effective_date, [])
-
-        sunday_header = "🏖️ *Aaj Sunday hai — Kal ka exam details:*\n" if is_sunday_preview else ""
-        day_label = "Tomorrow (Monday, 02-11-2026)" if is_sunday_preview else "Today"
-
-        if student_exams:
-            if len(student_exams) == 1:
-                ex = student_exams[0]
-                sitting_block = f"""> 📖 *{day_label}:* *{ex['subject']}* 🔴
-> 📍 *Hall:* *{ex['hall_no']}* 🔴
-> ⏰ *Time:* {ex['time']}"""
-                hall_alert = ex['hall_no']
-            else:
-                blocks = []
-                rooms = []
-                for idx, ex in enumerate(student_exams, 1):
-                    blocks.append(f"""{idx}️⃣ *Sitting {idx}:*
-> 📖 *Subject:* *{ex['subject']}* 🔴
-> 📍 *Hall:* *{ex['hall_no']}* 🔴
-> ⏰ *Time:* {ex['time']}""")
-                    rooms.append(ex['hall_no'])
-                sitting_block = "\n\n".join(blocks)
-                hall_alert = " & ".join(rooms)
-
-            # Send Real-Time Alert to Admin's Telegram!
-            send_telegram_admin_alert(
-                sender_phone=sender_phone,
-                student_name=st['name'],
-                roll_no=st['roll_no'],
-                stream_class=f"{st['class_year']} ({st['stream']})",
-                room=hall_alert,
-                user_msg=raw_text
-            )
-
-            reply = f"""🏛️ *RBHS EXAM DESK*
-───────────────
-👤 *{st['name']}*
-🆔 Roll No: `{st['roll_no']}`
-🎓 {cls_stream}
-───────────────
-{sunday_header}{sitting_block}
-───────────────
-📚 *All Subjects:*
-{subjs_line}
-───────────────
-⚠️ *15 min pehle pahuchein. All the best!* 👍"""
-            return reply
-
-        else:
-            # Student has NO exam on this day (e.g. Arts student without History on Day 4)
-            send_telegram_admin_alert(
-                sender_phone=sender_phone,
-                student_name=st['name'],
-                roll_no=st['roll_no'],
-                stream_class=f"{st['class_year']} ({st['stream']})",
-                room="NO EXAM TODAY",
-                user_msg=raw_text
-            )
-
-            day_word = "Kal (Monday, 02-Nov)" if is_sunday_preview else f"Aaj ({effective_date})"
-            reply = f"""🏛️ *RBHS EXAM DESK*
-───────────────
-👤 *{st['name']}*
-🆔 Roll No: `{st['roll_no']}`
-🎓 {cls_stream}
-───────────────
-🏖️ *{day_word} aapka koi exam scheduled nahi hai.*
-(Ye subject aapke registered subjects me nahi hai).
-───────────────
-📚 *Aapke Registered Subjects:*
-{subjs_line}
-───────────────
-💡 *Exam schedule janne ke liye 'ROUTINE' type karein.*"""
-            return reply
-
-    # Fallback for earlier testing dates (Day 1, 2, 3)
-    if today_str not in SCHEDULE:
-        today_str = '2026-10-29' # Default during testing
-        
-    day_info = SCHEDULE[today_str]
-    batch_key = '1st_year' if '1st' in st['class_year'] else '2nd_year'
-    exam_details = day_info[batch_key].get(st['stream'], ('Unknown Subject', 'Check Notice'))
-    subject_today, sitting_time = exam_details
-    hall_no = st['hall_no']
-
-    # Send Real-Time Alert to Admin's Telegram!
+    # Send Real-Time Alert to Admin's Telegram
     send_telegram_admin_alert(
         sender_phone=sender_phone,
         student_name=st['name'],
         roll_no=st['roll_no'],
         stream_class=f"{st['class_year']} ({st['stream']})",
-        room=hall_no,
+        room="Academic Profile",
         user_msg=raw_text
     )
 
-    reply = f"""🏛️ *RBHS EXAM DESK*
+    reply = f"""🏛️ *RBHS STUDENT PROFILE*
 ───────────────
 👤 *{st['name']}*
-🆔 Roll No: `{st['roll_no']}`
+> 🆔 *Roll No:* `{st['roll_no']}` 🔴
 🎓 {cls_stream}
 ───────────────
-> 📖 *Today:* *{subject_today}* 🔴
-> 📍 *Hall:* *{hall_no}* 🔴
-> ⏰ *Time:* {sitting_time}
+📚 *Registered Subjects ({len(subjs_list)}):*
+{subjs_bullets}
 ───────────────
-📚 *All Subjects:*
-{subjs_line}
-───────────────
-⚠️ *15 min pehle pahuchein. All the best!* 👍"""
+💡 *Kisi subject ke sabhi students janne ke liye subject ka naam bhejein (e.g. `HISTORY`, `LOGIC`).*"""
 
     return reply
 
@@ -810,7 +745,7 @@ def health():
         
     return jsonify({
         "status": "online",
-        "service": "RBHS WhatsApp Student Exam Bot",
+        "service": "RBHS WhatsApp Academic & Student Bot",
         "primary_database": "Neon Serverless PostgreSQL Cloud Database",
         "total_enrolled_records": len(STUDENT_DB),
         "total_students_used_bot": users_count,
